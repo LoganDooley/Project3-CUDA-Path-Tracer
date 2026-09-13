@@ -8,6 +8,9 @@ set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_ARCHITECTURES native)
 
+# CUDA Setup
+find_package(CUDAToolkit REQUIRED)
+
 # GLFW Setup
 set(GLFW_BUILD_DOCS OFF CACHE INTERNAL "")
 set(GLFW_BUILD_TESTS OFF CACHE INTERNAL "")
@@ -40,6 +43,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 	external/stb/
 	external/imgui/
 	external/imgui/backends
+	${CUDAToolkit_INCLUDE_DIRS}
 )
 
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE GLFW_INCLUDE_VULKAN)
@@ -49,6 +53,8 @@ PRIVATE
 	Vulkan::Vulkan
 	glfw
 	glm::glm
+	CUDA::cudart
+	CUDA::cuda_driver
 )
 
 if(WIN32)

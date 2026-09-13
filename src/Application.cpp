@@ -8,6 +8,8 @@
 
 #include <iostream>
 
+#include "kernel.h"
+
 Application::Application() {
 	if (!glfwInit()) {
 		throw std::runtime_error("Failed to initialize GLFW");
@@ -29,6 +31,18 @@ Application::~Application() {
 
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
+
+	if (m_cudaSurfaceObject) {
+		cudaDestroySurfaceObject(m_cudaSurfaceObject);
+	}
+
+	if (m_cudaMipmappedArray) {
+		cudaFreeMipmappedArray(m_cudaMipmappedArray);
+	}
+
+	if (m_cudaExtMemory) {
+		cudaDestroyExternalMemory(m_cudaExtMemory);
+	}
 
 	glfwTerminate();
 }
@@ -98,6 +112,8 @@ void Application::run() {
 
 		ImGui::Render();
 
+		launchColorKernel(m_cudaSurfaceObject, m_vkSwapchainExtent.width, m_vkSwapchainExtent.height, 0.8, 0.7, 0.1);
+
 		currentCommandBuffer.reset();
 		currentCommandBuffer.begin(vk::CommandBufferBeginInfo{});
 
@@ -105,23 +121,61 @@ void Application::run() {
 		std::vector<vk::Image> rawSwapchainImages = m_vkSwapchain.getImages();
 		vk::Image activeImage = rawSwapchainImages[imageIndex];
 
-		// Set up barrier to write to image
-		vk::ImageMemoryBarrier barrierToRender{};
-		barrierToRender.oldLayout = vk::ImageLayout::eUndefined;
-		barrierToRender.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
-		barrierToRender.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrierToRender.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrierToRender.image = activeImage;
-		barrierToRender.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-		barrierToRender.subresourceRange.baseMipLevel = 0;
-		barrierToRender.subresourceRange.levelCount = 1;
-		barrierToRender.subresourceRange.baseArrayLayer = 0;
-		barrierToRender.subresourceRange.layerCount = 1;
-		barrierToRender.srcAccessMask = vk::AccessFlags(0);
-		barrierToRender.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+		// Set up barrier for copying interop image
+		vk::ImageMemoryBarrier interopBarrier{};
+		interopBarrier.oldLayout = vk::ImageLayout::eUndefined;
+		interopBarrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
+		interopBarrier.image = *m_interopImage;
+		interopBarrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+		interopBarrier.subresourceRange.levelCount = 1;
+		interopBarrier.subresourceRange.layerCount = 1;
+		interopBarrier.srcAccessMask = vk::AccessFlags(0);
+		interopBarrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+
+		// Set up barrier for writing to swapchain image
+		vk::ImageMemoryBarrier swapchainBarrier{};
+		swapchainBarrier.oldLayout = vk::ImageLayout::eUndefined;
+		swapchainBarrier.newLayout = vk::ImageLayout::eTransferDstOptimal;
+		swapchainBarrier.image = activeImage;
+		swapchainBarrier.subresourceRange = interopBarrier.subresourceRange;
+		swapchainBarrier.srcAccessMask = vk::AccessFlags(0);
+		swapchainBarrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
 
 		currentCommandBuffer.pipelineBarrier(
 			vk::PipelineStageFlagBits::eTopOfPipe,
+			vk::PipelineStageFlagBits::eTransfer,
+			vk::DependencyFlags(0),
+			nullptr,
+			nullptr,
+			{ interopBarrier, swapchainBarrier }
+		);
+
+		// Copy interop texture to swapchain
+		vk::ImageCopy copyRegion{};
+		copyRegion.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+		copyRegion.srcSubresource.layerCount = 1;
+		copyRegion.dstSubresource = copyRegion.srcSubresource;
+		copyRegion.extent = vk::Extent3D(m_vkSwapchainExtent.width, m_vkSwapchainExtent.height, 1);
+
+		currentCommandBuffer.copyImage(
+			*m_interopImage, 
+			vk::ImageLayout::eTransferSrcOptimal,
+			activeImage, 
+			vk::ImageLayout::eTransferDstOptimal,
+			{ copyRegion }
+		);
+
+		// Set up barrier to write to image
+		vk::ImageMemoryBarrier barrierToRender{};
+		barrierToRender.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+		barrierToRender.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
+		barrierToRender.image = activeImage;
+		barrierToRender.subresourceRange = interopBarrier.subresourceRange;
+		barrierToRender.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+		barrierToRender.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite;
+
+		currentCommandBuffer.pipelineBarrier(
+			vk::PipelineStageFlagBits::eTransfer,
 			vk::PipelineStageFlagBits::eColorAttachmentOutput,
 			vk::DependencyFlags(0), 
 			nullptr, 
@@ -133,13 +187,12 @@ void Application::run() {
 		vk::RenderingAttachmentInfo colorAttachment{};
 		colorAttachment.imageView = *m_vkSwapchainImageViews[imageIndex];
 		colorAttachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
-		colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+		colorAttachment.loadOp = vk::AttachmentLoadOp::eLoad;
 		colorAttachment.storeOp = vk::AttachmentStoreOp::eStore;
-		colorAttachment.clearValue.color = vk::ClearColorValue(std::array<float, 4>{0.1f, 0.1f, 0.13f, 1.0f});
 
 		vk::RenderingInfo renderingInfo{};
 		renderingInfo.renderArea.offset = vk::Offset2D{ 0, 0 };
-		renderingInfo.renderArea.extent = vk::Extent2D{ 800, 600 };
+		renderingInfo.renderArea.extent = m_vkSwapchainExtent;
 		renderingInfo.layerCount = 1;
 		renderingInfo.colorAttachmentCount = 1;
 		renderingInfo.pColorAttachments = &colorAttachment;
@@ -471,6 +524,43 @@ void Application::InitCUDAVulkanInterop()
 	interopViewInfo.subresourceRange.layerCount = 1;
 
 	m_interopImageView = vk::raii::ImageView(m_vkDevice, interopViewInfo);
+	
+	cudaExternalMemoryHandleDesc extMemDesc{};
+	extMemDesc.type = cudaExternalMemoryHandleTypeOpaqueWin32;
+	extMemDesc.handle.win32.handle = m_interopImageHandle;
+	extMemDesc.size = memoryRequirements.size;
+
+	if (cudaImportExternalMemory(&m_cudaExtMemory, &extMemDesc) != cudaSuccess) {
+		throw std::runtime_error("CUDA failed to import vulkan memory handle");
+	}
+
+	cudaExternalMemoryMipmappedArrayDesc mipDesc{};
+	mipDesc.offset = 0;
+	mipDesc.formatDesc.x = 8;
+	mipDesc.formatDesc.y = 8;
+	mipDesc.formatDesc.z = 8;
+	mipDesc.formatDesc.w = 8;
+	mipDesc.formatDesc.f = cudaChannelFormatKindUnsigned;
+	mipDesc.extent.width = m_vkSwapchainExtent.width;
+	mipDesc.extent.height = m_vkSwapchainExtent.height;
+	mipDesc.extent.depth = 0;
+	mipDesc.numLevels = 1;
+
+	if (cudaExternalMemoryGetMappedMipmappedArray(&m_cudaMipmappedArray, m_cudaExtMemory, &mipDesc) != cudaSuccess) {
+		throw std::runtime_error("CUDA Failed to map external mipmapped array");
+	}
+
+	if (cudaGetMipmappedArrayLevel(&m_cudaArray, m_cudaMipmappedArray, 0) != cudaSuccess) {
+		throw std::runtime_error("CUDA Failed to get mipmapped array level");
+	}
+
+	cudaResourceDesc resDesc{};
+	resDesc.resType = cudaResourceTypeArray;
+	resDesc.res.array.array = m_cudaArray;
+
+	if (cudaCreateSurfaceObject(&m_cudaSurfaceObject, &resDesc) != cudaSuccess) {
+		throw std::runtime_error("CUDA Failed to create surface object");
+	}
 }
 
 void Application::InitImGui() {
