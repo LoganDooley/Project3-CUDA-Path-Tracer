@@ -53,6 +53,12 @@ void Application::run() {
 	while (!glfwWindowShouldClose(m_window.GetGLFWwindow())) {
 		glfwPollEvents();
 
+		if (m_window.m_hasBeenResized) {
+			recreateSwapchain();
+			m_window.m_hasBeenResized = false;
+			continue;
+		}
+
 		// Update performance metrics
 		double currentTime = glfwGetTime();
 		float deltaTime = static_cast<float>(currentTime - m_previousFrameTime);
@@ -84,8 +90,21 @@ void Application::run() {
 		m_vkDevice.resetFences({ *currentInFlightFence });
 
 		// Grab next swapchain image
-		auto [result, imageIndex] = m_vkSwapchain.acquireNextImage(UINT64_MAX, *currentImageAvailableSemaphore);
-		if (result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR) {
+		vk::Result acquireResult = vk::Result::eSuccess;
+		uint32_t imageIndex = 0;
+		try {
+			std::tie(acquireResult, imageIndex) = m_vkSwapchain.acquireNextImage(UINT64_MAX, *currentImageAvailableSemaphore);
+		}
+		catch (const vk::OutOfDateKHRError&) {
+			recreateSwapchain();
+			continue;
+		}
+
+		if (acquireResult == vk::Result::eSuboptimalKHR) {
+			recreateSwapchain();
+			continue;
+		}
+		else if (acquireResult != vk::Result::eSuccess) {
 			throw std::runtime_error("Failed to acquire swapchain iamge");
 		}
 
@@ -241,7 +260,16 @@ void Application::run() {
 		presentInfo.pSwapchains = &(*m_vkSwapchain);
 		presentInfo.pImageIndices = &imageIndex;
 
-		m_vkGraphicsQueue.presentKHR(presentInfo);
+		try {
+			vk::Result presentResult = m_vkGraphicsQueue.presentKHR(presentInfo);
+		
+			if (presentResult == vk::Result::eSuboptimalKHR) {
+				recreateSwapchain();
+			}
+		}
+		catch (const vk::OutOfDateKHRError&) {
+			recreateSwapchain();
+		} 
 
 		m_currentFrameIndex = (m_currentFrameIndex + 1) % maxFramesInFlight;
 	}
@@ -605,4 +633,77 @@ void Application::InitImGui() {
 	init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &rawFormat;
 
 	ImGui_ImplVulkan_Init(&init_info);
+}
+
+void Application::recreateSwapchain()
+{
+	int width = 0;
+	int height = 0;
+	while (width == 0 || height == 0) {
+		m_window.getFramebufferSize(&width, &height);
+
+		// Sleep the thread until glfw is resized
+		if (width == 0 || height == 0) {
+			glfwWaitEvents();
+		}
+	}
+
+	// Wait for GPU to finish before continuing
+	m_vkDevice.waitIdle();
+
+	// Clean up cuda interop objects
+	if (m_cudaSurfaceObject) { 
+		cudaDestroySurfaceObject(m_cudaSurfaceObject); 
+		m_cudaSurfaceObject = 0; 
+	}
+	if (m_cudaMipmappedArray) { 
+		cudaFreeMipmappedArray(m_cudaMipmappedArray); 
+		m_cudaMipmappedArray = nullptr; 
+	}
+	if (m_cudaExtMemory) { 
+		cudaDestroyExternalMemory(m_cudaExtMemory); 
+		m_cudaExtMemory = nullptr; 
+	}
+	m_interopImageView = nullptr;
+	m_interopImageMemory = nullptr;
+	m_interopImage = nullptr;
+
+	// Get new surface capabilities
+	vk::SurfaceCapabilitiesKHR capabilities = m_vkPhysicalDevice.getSurfaceCapabilitiesKHR(*m_vkSurface);
+	m_vkSwapchainExtent = capabilities.currentExtent;
+
+	// Rebuild swapchain
+	vk::SwapchainCreateInfoKHR swapchainCreateInfo{};
+	swapchainCreateInfo.surface = *m_vkSurface;
+	swapchainCreateInfo.minImageCount = static_cast<uint32_t>(m_vkSwapchainImageViews.size());
+	swapchainCreateInfo.imageFormat = m_vkSurfaceFormat.format;
+	swapchainCreateInfo.imageColorSpace = m_vkSurfaceFormat.colorSpace;
+	swapchainCreateInfo.imageExtent = m_vkSwapchainExtent;
+	swapchainCreateInfo.imageArrayLayers = 1;
+	swapchainCreateInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransferDst;
+	swapchainCreateInfo.imageSharingMode = vk::SharingMode::eExclusive;
+	swapchainCreateInfo.preTransform = capabilities.currentTransform;
+	swapchainCreateInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
+	swapchainCreateInfo.presentMode = vk::PresentModeKHR::eFifo;
+	swapchainCreateInfo.clipped = VK_TRUE;
+	swapchainCreateInfo.oldSwapchain = *m_vkSwapchain;
+
+	vk::raii::SwapchainKHR tempSwapchain(m_vkDevice, swapchainCreateInfo);
+	m_vkSwapchain = std::move(tempSwapchain);
+
+	// Grab the swapchain image views
+	std::vector<vk::Image> swapchainImages = m_vkSwapchain.getImages();
+	m_vkSwapchainImageViews.clear();
+	for (const auto& image : swapchainImages) {
+		vk::ImageViewCreateInfo viewInfo{};
+		viewInfo.image = image;
+		viewInfo.viewType = vk::ImageViewType::e2D;
+		viewInfo.format = m_vkSurfaceFormat.format;
+		viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+		viewInfo.subresourceRange.levelCount = 1;
+		viewInfo.subresourceRange.layerCount = 1;
+		m_vkSwapchainImageViews.emplace_back(m_vkDevice, viewInfo);
+	}
+
+	InitCUDAVulkanInterop();
 }

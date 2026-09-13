@@ -9,6 +9,10 @@ Window::Window(int width, int height, const char* title) {
 	if (!m_glfwWindow) {
 		throw std::runtime_error("Failed to create GLFW window");
 	}
+
+	glfwSetWindowUserPointer(m_glfwWindow, this);
+
+	glfwSetFramebufferSizeCallback(m_glfwWindow, FramebufferResizeCallback);
 }
 
 Window::Window(Window&& other) noexcept : 
@@ -26,6 +30,19 @@ Window& Window::operator=(Window&& other) noexcept {
 		other.m_glfwWindow = nullptr;
 	}
 	return *this;
+}
+
+void Window::getFramebufferSize(int* width, int* height)
+{
+	glfwGetFramebufferSize(m_glfwWindow, width, height);
+}
+
+void Window::FramebufferResizeCallback(GLFWwindow* glfwWindow, int width, int height)
+{
+	auto window = reinterpret_cast<Window*>(glfwGetWindowUserPointer(glfwWindow));
+	if (window) {
+		window->m_hasBeenResized = true;
+	}
 }
 
 Window::~Window() {

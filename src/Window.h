@@ -18,6 +18,12 @@ public:
 
 	GLFWwindow* GetGLFWwindow() const { return m_glfwWindow; }
 
+	void getFramebufferSize(int* width, int* height);
+
+	bool m_hasBeenResized = false;
+
 private:
+	static void FramebufferResizeCallback(GLFWwindow* glfwWindow, int width, int height);
+
 	GLFWwindow* m_glfwWindow = nullptr;
 };

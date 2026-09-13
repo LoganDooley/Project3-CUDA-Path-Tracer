@@ -26,6 +26,8 @@ private:
 	void InitCUDAVulkanInterop();
 	void InitImGui();
 
+	void recreateSwapchain();
+
 	vk::raii::Context m_vkContext;
 	Window m_window;
 
