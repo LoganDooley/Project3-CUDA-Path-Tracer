@@ -1,6 +1,7 @@
 #pragma once
 
-#include "Window.h"
+#include "window.h"
+#include "renderer.h"
 
 #include <vulkan/vulkan_raii.hpp>
 #include <cuda.h>
@@ -30,6 +31,7 @@ private:
 
 	vk::raii::Context m_vkContext;
 	Window m_window;
+	Renderer m_renderer;
 
 	vk::raii::Instance m_vkInstance = nullptr;
 	vk::raii::SurfaceKHR m_vkSurface = nullptr;
@@ -47,10 +49,6 @@ private:
 	vk::raii::DeviceMemory m_interopImageMemory = nullptr;
 	vk::raii::ImageView m_interopImageView = nullptr;
 	HANDLE m_interopImageHandle = nullptr;
-	cudaExternalMemory_t m_cudaExtMemory = nullptr;
-	cudaMipmappedArray_t m_cudaMipmappedArray = nullptr;
-	cudaArray_t m_cudaArray = nullptr;
-	cudaSurfaceObject_t m_cudaSurfaceObject = 0;
 
 	vk::raii::DescriptorPool m_imguiDescriptorPool = nullptr;
 

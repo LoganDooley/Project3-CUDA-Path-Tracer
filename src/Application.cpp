@@ -1,4 +1,4 @@
-#include "Application.h"
+#include "application.h"
 
 #include "glfw/glfw3.h"
 
@@ -31,18 +31,6 @@ Application::~Application() {
 
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
-
-	if (m_cudaSurfaceObject) {
-		cudaDestroySurfaceObject(m_cudaSurfaceObject);
-	}
-
-	if (m_cudaMipmappedArray) {
-		cudaFreeMipmappedArray(m_cudaMipmappedArray);
-	}
-
-	if (m_cudaExtMemory) {
-		cudaDestroyExternalMemory(m_cudaExtMemory);
-	}
 
 	glfwTerminate();
 }
@@ -131,7 +119,7 @@ void Application::run() {
 
 		ImGui::Render();
 
-		launchColorKernel(m_cudaSurfaceObject, m_vkSwapchainExtent.width, m_vkSwapchainExtent.height, 0.8, 0.7, 0.1);
+		m_renderer.render();
 
 		currentCommandBuffer.reset();
 		currentCommandBuffer.begin(vk::CommandBufferBeginInfo{});
@@ -553,42 +541,7 @@ void Application::InitCUDAVulkanInterop()
 
 	m_interopImageView = vk::raii::ImageView(m_vkDevice, interopViewInfo);
 	
-	cudaExternalMemoryHandleDesc extMemDesc{};
-	extMemDesc.type = cudaExternalMemoryHandleTypeOpaqueWin32;
-	extMemDesc.handle.win32.handle = m_interopImageHandle;
-	extMemDesc.size = memoryRequirements.size;
-
-	if (cudaImportExternalMemory(&m_cudaExtMemory, &extMemDesc) != cudaSuccess) {
-		throw std::runtime_error("CUDA failed to import vulkan memory handle");
-	}
-
-	cudaExternalMemoryMipmappedArrayDesc mipDesc{};
-	mipDesc.offset = 0;
-	mipDesc.formatDesc.x = 8;
-	mipDesc.formatDesc.y = 8;
-	mipDesc.formatDesc.z = 8;
-	mipDesc.formatDesc.w = 8;
-	mipDesc.formatDesc.f = cudaChannelFormatKindUnsigned;
-	mipDesc.extent.width = m_vkSwapchainExtent.width;
-	mipDesc.extent.height = m_vkSwapchainExtent.height;
-	mipDesc.extent.depth = 0;
-	mipDesc.numLevels = 1;
-
-	if (cudaExternalMemoryGetMappedMipmappedArray(&m_cudaMipmappedArray, m_cudaExtMemory, &mipDesc) != cudaSuccess) {
-		throw std::runtime_error("CUDA Failed to map external mipmapped array");
-	}
-
-	if (cudaGetMipmappedArrayLevel(&m_cudaArray, m_cudaMipmappedArray, 0) != cudaSuccess) {
-		throw std::runtime_error("CUDA Failed to get mipmapped array level");
-	}
-
-	cudaResourceDesc resDesc{};
-	resDesc.resType = cudaResourceTypeArray;
-	resDesc.res.array.array = m_cudaArray;
-
-	if (cudaCreateSurfaceObject(&m_cudaSurfaceObject, &resDesc) != cudaSuccess) {
-		throw std::runtime_error("CUDA Failed to create surface object");
-	}
+	m_renderer.resize(m_vkDevice, m_interopImageHandle, m_vkSwapchainExtent, memoryRequirements.size);
 }
 
 void Application::InitImGui() {
@@ -652,18 +605,6 @@ void Application::recreateSwapchain()
 	m_vkDevice.waitIdle();
 
 	// Clean up cuda interop objects
-	if (m_cudaSurfaceObject) { 
-		cudaDestroySurfaceObject(m_cudaSurfaceObject); 
-		m_cudaSurfaceObject = 0; 
-	}
-	if (m_cudaMipmappedArray) { 
-		cudaFreeMipmappedArray(m_cudaMipmappedArray); 
-		m_cudaMipmappedArray = nullptr; 
-	}
-	if (m_cudaExtMemory) { 
-		cudaDestroyExternalMemory(m_cudaExtMemory); 
-		m_cudaExtMemory = nullptr; 
-	}
 	m_interopImageView = nullptr;
 	m_interopImageMemory = nullptr;
 	m_interopImage = nullptr;
