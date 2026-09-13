@@ -55,4 +55,9 @@ private:
 	std::vector<vk::raii::Semaphore> m_renderFinishedSemaphores;
 	std::vector<vk::raii::Fence> m_inFlightFences;
 	size_t m_currentFrameIndex = 0;
+
+	// Performance tracking
+	double m_previousFrameTime = 0.0;
+	std::vector<float> m_frameTimeHistory = std::vector<float>(100, 0.0f);
+	size_t m_historyOffset = 0;
 };

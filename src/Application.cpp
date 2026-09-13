@@ -20,6 +20,8 @@ Application::Application() {
 	InitCUDAVulkanInterop();
 
 	InitImGui();
+
+	m_previousFrameTime = glfwGetTime();
 }
 
 Application::~Application() {
@@ -37,6 +39,23 @@ void Application::run() {
 	while (!glfwWindowShouldClose(m_window.GetGLFWwindow())) {
 		glfwPollEvents();
 
+		// Update performance metrics
+		double currentTime = glfwGetTime();
+		float deltaTime = static_cast<float>(currentTime - m_previousFrameTime);
+		m_previousFrameTime = currentTime;
+
+		float currentFps = 0.0f;
+		float currentFrameTimeMs = 0.0f;
+		if (deltaTime > 0.0f) {
+			currentFps = 1.0f / deltaTime;
+			currentFrameTimeMs = deltaTime * 1000.f;
+		}
+
+		// Add to circular buffer
+		m_frameTimeHistory[m_historyOffset] = currentFrameTimeMs;
+		m_historyOffset = (m_historyOffset + 1) % m_frameTimeHistory.size();
+
+		// Get current objects in flight
 		auto& currentInFlightFence = m_inFlightFences[m_currentFrameIndex];
 		auto& currentImageAvailableSemaphore = m_imageAvailableSemaphores[m_currentFrameIndex];
 
@@ -65,6 +84,16 @@ void Application::run() {
 		ImGui::NewFrame();
 
 		ImGui::Begin("Test Window");
+		ImGui::Text("Performance Stats:");
+		ImGui::Text("FPS: %.1f", currentFps);
+		ImGui::Text("Frame Time: %.2f ms", currentFrameTimeMs);
+		ImGui::PlotLines("##FrameTimeGraph",
+			m_frameTimeHistory.data(),
+			static_cast<int>(m_frameTimeHistory.size()),
+			static_cast<int>(m_historyOffset),
+			"Frame Times (ms)",
+			0.0f, 33.f,
+			ImVec2(0, 80));
 		ImGui::End();
 
 		ImGui::Render();
