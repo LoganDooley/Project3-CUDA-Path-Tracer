@@ -4,6 +4,8 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
+#include "pathTraceCommon.h"
+
 class Renderer {
 public:
 	Renderer();
@@ -20,10 +22,18 @@ public:
 private:
 	void cleanup();
 
+	int getPixelCount() const { return m_extent.width * m_extent.height; }
+
 	cudaExternalMemory_t m_cudaExtMemory = nullptr;
 	cudaMipmappedArray_t m_cudaMipmappedArray = nullptr;
 	cudaArray_t m_cudaArray = nullptr;
 	cudaSurfaceObject_t m_cudaSurfaceObject = 0;
 
 	vk::Extent2D m_extent;
+
+	PathState* dev_pathStates = nullptr;
+	Ray* dev_currentRays = nullptr;
+	Ray* dev_nextRays = nullptr;
+
+	int m_activeRayCount = 0;
 };

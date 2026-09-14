@@ -46,7 +46,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 	${CUDAToolkit_INCLUDE_DIRS}
 )
 
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE GLFW_INCLUDE_VULKAN)
+target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE GLFW_INCLUDE_VULKAN GLM_FORCE_PURE)
 
 target_link_libraries(${CMAKE_PROJECT_NAME} 
 PRIVATE 
@@ -55,6 +55,14 @@ PRIVATE
 	glm::glm
 	CUDA::cudart
 	CUDA::cuda_driver
+)
+
+target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:
+		--expt-relaxed-constexpr # Required for glm to work with CUDA
+        $<$<CONFIG:Debug>:-G> 
+        --generate-line-info
+    >
 )
 
 if(WIN32)
