@@ -84,7 +84,12 @@ void Renderer::render()
         cameraPos, cameraLook, cameraRight, cameraUp,
         fovY);
 
-    launchDebugRaysKernel(dev_currentRays, m_cudaSurfaceObject, m_extent.width, m_extent.height);
+    launchIntersectKernel(dev_currentRays, dev_pathStates, m_extent.width, m_extent.height);
+
+    launchColorSurfaceKernel(dev_currentRays, dev_pathStates, m_extent.width, m_extent.height, m_cudaSurfaceObject);
+
+    //launchDebugRaysKernel(dev_currentRays, dev_pathStates, m_cudaSurfaceObject, m_extent.width, m_extent.height);
+
     cudaDeviceSynchronize();
 }
 
