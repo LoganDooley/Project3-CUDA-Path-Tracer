@@ -45,7 +45,7 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates, int width, int
     dev_pathStates[pixelIndex] = pathState;
 }
 
-__global__ void kernIntersect(PathState* dev_pathStates,
+__global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_intersectionData,
     int n)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -59,7 +59,9 @@ __global__ void kernIntersect(PathState* dev_pathStates,
     Sphere sceneSphere = Sphere{};
     IntersectionData intersection = sceneSphere.intersect(currentRay);
 
-    if (intersection.bHit) {
+    dev_intersectionData[index] = intersection;
+
+    if (intersection.t > 0.0f) {
         dev_pathStates[index].accumulatedColor = intersection.normal;
     }
 }
@@ -142,13 +144,13 @@ void launchCameraRayGenKernel(PathState* dev_pathStates, int width, int height, 
         );
 }
 
-void launchIntersectKernel(PathState* dev_pathStates, int width, int height)
+void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int width, int height)
 {
     int n = width * height;
     dim3 blockSize(32);
     dim3 gridSize(divup(n, blockSize.x));
 
-    kernIntersect << <gridSize, blockSize >> > (dev_pathStates, width * height);
+    kernIntersect << <gridSize, blockSize >> > (dev_pathStates, dev_intersectionData, width * height);
 }
 
 void launchColorSurfaceKernel(PathState* dev_pathStates, int width, int height, cudaSurfaceObject_t surface)

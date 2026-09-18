@@ -16,6 +16,7 @@ __global__ void kernGenerateCameraRays(
 
 __global__ void kernIntersect(
 	PathState* dev_pathStates,
+	IntersectionData* dev_intersectionData,
 	int n
 );
 
@@ -34,6 +35,7 @@ void launchCameraRayGenKernel(PathState* dev_pathStates,
 	float fovY);
 
 void launchIntersectKernel(PathState* dev_pathStates,
+	IntersectionData* dev_intersectionData,
 	int width, int height);
 
 void launchColorSurfaceKernel(PathState* dev_pathStates,

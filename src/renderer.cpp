@@ -55,6 +55,10 @@ void Renderer::resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
     if (cudaMalloc((void**)&dev_pathStates, getPixelCount() * sizeof(PathState)) != cudaSuccess) {
         throw std::runtime_error("CUDA Failed to allocate dev_pathStates");
     }
+
+    if (cudaMalloc((void**)&dev_intersectionData, getPixelCount() * sizeof(IntersectionData)) != cudaSuccess) {
+        throw std::runtime_error("CUDA Failed to allocate dev_intersectionData");
+    }
 }
 
 void Renderer::render()
@@ -75,7 +79,7 @@ void Renderer::render()
         cameraPos, cameraLook, cameraRight, cameraUp,
         fovY);
 
-    launchIntersectKernel(dev_pathStates, m_extent.width, m_extent.height);
+    launchIntersectKernel(dev_pathStates, dev_intersectionData, m_extent.width, m_extent.height);
 
     launchColorSurfaceKernel(dev_pathStates, m_extent.width, m_extent.height, m_cudaSurfaceObject);
 
@@ -101,6 +105,11 @@ void Renderer::cleanup()
     if (dev_pathStates) {
         cudaFree(dev_pathStates);
         dev_pathStates = nullptr;
+    }
+
+    if (dev_intersectionData) {
+        cudaFree(dev_intersectionData);
+        dev_intersectionData = nullptr;
     }
 
     m_activeRayCount = 0;

@@ -24,10 +24,9 @@ struct PathState {
 };
 
 struct IntersectionData {
-	glm::vec3 position = glm::vec3(0);
-	int materialIndex = 0;
 	glm::vec3 normal = glm::vec3(1, 0, 0);
-	bool bHit = false;
+	float t = -1;
+	int materialIndex = 0;
 };
 
 struct Primitive {
@@ -65,9 +64,9 @@ struct Sphere : public Primitive {
 			}
 		}
 
-		result.bHit = true;
-		result.position = ray.getPositionAtTime(t0);
-		result.normal = MathHelpers::safeNormalize(result.position - position);
+		result.normal = MathHelpers::safeNormalize(ray.getPositionAtTime(t0) - position);
+		result.t = t0;
+		result.materialIndex = 0;
 
 		return result;
 	}

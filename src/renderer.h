@@ -32,6 +32,7 @@ private:
 	vk::Extent2D m_extent;
 
 	PathState* dev_pathStates = nullptr;
+	IntersectionData* dev_intersectionData = nullptr;
 
 	int m_activeRayCount = 0;
 };
