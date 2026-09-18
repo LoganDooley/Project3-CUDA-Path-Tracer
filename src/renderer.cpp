@@ -81,6 +81,8 @@ void Renderer::render()
 
     launchIntersectKernel(dev_pathStates, dev_intersectionData, m_extent.width, m_extent.height);
 
+    launchShadeKernel(dev_pathStates, dev_intersectionData, m_extent.width, m_extent.height);
+
     launchColorSurfaceKernel(dev_pathStates, m_extent.width, m_extent.height, m_cudaSurfaceObject);
 
     cudaDeviceSynchronize();

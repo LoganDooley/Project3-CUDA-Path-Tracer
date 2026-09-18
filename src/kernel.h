@@ -20,6 +20,12 @@ __global__ void kernIntersect(
 	int n
 );
 
+__global__ void kernShade(
+	PathState* dev_pathStates,
+	IntersectionData* dev_intersectionData,
+	int n
+);
+
 __global__ void kernColorSurface(cudaSurfaceObject_t surface, PathState* dev_pathStates, int n, int width);
 
 __global__ void kernDebugRays(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height);
@@ -35,6 +41,10 @@ void launchCameraRayGenKernel(PathState* dev_pathStates,
 	float fovY);
 
 void launchIntersectKernel(PathState* dev_pathStates,
+	IntersectionData* dev_intersectionData,
+	int width, int height);
+
+void launchShadeKernel(PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData,
 	int width, int height);
 

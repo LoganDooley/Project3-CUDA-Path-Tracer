@@ -60,10 +60,24 @@ __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_i
     IntersectionData intersection = sceneSphere.intersect(currentRay);
 
     dev_intersectionData[index] = intersection;
+}
 
-    if (intersection.t > 0.0f) {
-        dev_pathStates[index].accumulatedColor = intersection.normal;
+__global__ void kernShade(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int n)
+{
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (index > n) {
+        return;
     }
+
+    IntersectionData intersectionData = dev_intersectionData[index];
+    if (intersectionData.t <= 0.0f) {
+        return;
+    }
+
+    PathState pathState = dev_pathStates[index];
+
+    dev_pathStates[index].accumulatedColor = pathState.throughput * intersectionData.normal;
 }
 
 __global__ void kernColorSurface(cudaSurfaceObject_t surface, PathState* dev_pathStates, int n, int width)
@@ -151,6 +165,15 @@ void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_inte
     dim3 gridSize(divup(n, blockSize.x));
 
     kernIntersect << <gridSize, blockSize >> > (dev_pathStates, dev_intersectionData, width * height);
+}
+
+void launchShadeKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int width, int height)
+{
+    int n = width * height;
+    dim3 blockSize(32);
+    dim3 gridSize(divup(n, blockSize.x));
+
+    kernShade << <gridSize, blockSize >> > (dev_pathStates, dev_intersectionData, width * height);
 }
 
 void launchColorSurfaceKernel(PathState* dev_pathStates, int width, int height, cudaSurfaceObject_t surface)
