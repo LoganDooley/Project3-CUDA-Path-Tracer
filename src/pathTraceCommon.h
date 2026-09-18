@@ -23,6 +23,38 @@ struct PathState {
 	int pixelIndex = -1;
 };
 
+enum GeomType
+{
+	SPHERE,
+	CUBE
+};
+
+struct Geom
+{
+	enum GeomType type;
+	int materialid;
+	glm::vec3 translation;
+	glm::vec3 rotation;
+	glm::vec3 scale;
+	glm::mat4 transform;
+	glm::mat4 inverseTransform;
+	glm::mat4 invTranspose;
+};
+
+struct Material
+{
+	glm::vec3 color;
+	struct
+	{
+		float exponent;
+		glm::vec3 color;
+	} specular;
+	float hasReflective;
+	float hasRefractive;
+	float indexOfRefraction;
+	float emittance;
+};
+
 struct IntersectionData {
 	glm::vec3 normal = glm::vec3(1, 0, 0);
 	float t = -1;
