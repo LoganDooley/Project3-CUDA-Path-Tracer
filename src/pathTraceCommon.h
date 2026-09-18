@@ -10,16 +10,17 @@ public:
 		return origin + t * direction;
 	}
 
-	glm::vec3 origin;
-	glm::vec3 direction;
-	int pixelIndex;
+	glm::vec3 origin = glm::vec3(0.0f);
+	glm::vec3 direction = glm::vec3(1.0f, 0.0f, 0.0f);
 };
 
 struct PathState {
+	Ray ray = Ray{};
 	glm::vec3 throughput = glm::vec3(1.0f);
 	glm::vec3 accumulatedColor = glm::vec3(0.0f);
 	int bounceCount = 0;
 	bool active = true;
+	int pixelIndex = -1;
 };
 
 struct IntersectionData {

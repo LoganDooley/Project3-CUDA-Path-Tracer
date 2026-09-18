@@ -32,8 +32,6 @@ private:
 	vk::Extent2D m_extent;
 
 	PathState* dev_pathStates = nullptr;
-	Ray* dev_currentRays = nullptr;
-	Ray* dev_nextRays = nullptr;
 
 	int m_activeRayCount = 0;
 };

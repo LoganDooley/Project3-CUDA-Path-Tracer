@@ -6,7 +6,6 @@
 #include "pathTraceCommon.h"
 
 __global__ void kernGenerateCameraRays(
-	Ray* dev_rays,
 	PathState* dev_pathStates,
 	int width, int height,
 	glm::vec3 cameraPos,
@@ -16,19 +15,17 @@ __global__ void kernGenerateCameraRays(
 	float fovY);
 
 __global__ void kernIntersect(
-	Ray* dev_rays,
 	PathState* dev_pathStates,
 	int n
 );
 
-__global__ void kernColorSurface(cudaSurfaceObject_t surface, Ray* dev_rays, PathState* dev_pathStates, int n, int width);
+__global__ void kernColorSurface(cudaSurfaceObject_t surface, PathState* dev_pathStates, int n, int width);
 
-__global__ void kernDebugRays(Ray* dev_rays, PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height);
+__global__ void kernDebugRays(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height);
 
 __global__ void fillSurfaceColorKernel(cudaSurfaceObject_t surface, int width, int height, float r, float g, float b);
 
-void launchCameraRayGenKernel(Ray* dev_rays,
-	PathState* dev_pathStates,
+void launchCameraRayGenKernel(PathState* dev_pathStates,
 	int width, int height,
 	glm::vec3 cameraPos,
 	glm::vec3 cameraLook,
@@ -36,15 +33,13 @@ void launchCameraRayGenKernel(Ray* dev_rays,
 	glm::vec3 cameraUp,
 	float fovY);
 
-void launchIntersectKernel(Ray* dev_rays,
-	PathState* dev_pathStates,
+void launchIntersectKernel(PathState* dev_pathStates,
 	int width, int height);
 
-void launchColorSurfaceKernel(Ray* dev_rays,
-	PathState* dev_pathStates,
+void launchColorSurfaceKernel(PathState* dev_pathStates,
 	int width, int height,
 	cudaSurfaceObject_t surface);
 
-void launchDebugRaysKernel(Ray* dev_rays, PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height);
+void launchDebugRaysKernel(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height);
 
 void launchColorKernel(cudaSurfaceObject_t surface, int width, int height, float r, float g, float b);

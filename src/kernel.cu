@@ -9,7 +9,7 @@ __device__ void get2DIndex(int index1D, int width, int* outX, int* outY) {
     *outY = index1D / width;
 }
 
-__global__ void kernGenerateCameraRays(Ray* dev_rays, PathState* dev_pathStates, int width, int height, glm::vec3 cameraPos, glm::vec3 cameraLook, glm::vec3 cameraRight, glm::vec3 cameraUp, float fovY)
+__global__ void kernGenerateCameraRays(PathState* dev_pathStates, int width, int height, glm::vec3 cameraPos, glm::vec3 cameraLook, glm::vec3 cameraRight, glm::vec3 cameraUp, float fovY)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -38,19 +38,14 @@ __global__ void kernGenerateCameraRays(Ray* dev_rays, PathState* dev_pathStates,
         (normalizedY * scale * cameraUp);
     rayDirection = glm::normalize(rayDirection);
 
-    Ray ray;
-    ray.origin = cameraPos;
-    ray.direction = rayDirection;
-    ray.pixelIndex = pixelIndex;
-
-    dev_rays[pixelIndex] = ray;
-
     PathState pathState = PathState{};
+    pathState.ray.origin = cameraPos;
+    pathState.ray.direction = rayDirection;
+    pathState.pixelIndex = pixelIndex;
     dev_pathStates[pixelIndex] = pathState;
 }
 
-__global__ void kernIntersect(Ray* dev_rays,
-    PathState* dev_pathStates,
+__global__ void kernIntersect(PathState* dev_pathStates,
     int n)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -59,7 +54,7 @@ __global__ void kernIntersect(Ray* dev_rays,
         return;
     }
 
-    Ray currentRay = dev_rays[index];
+    Ray currentRay = dev_pathStates[index].ray;
 
     Sphere sceneSphere = Sphere{};
     IntersectionData intersection = sceneSphere.intersect(currentRay);
@@ -69,7 +64,7 @@ __global__ void kernIntersect(Ray* dev_rays,
     }
 }
 
-__global__ void kernColorSurface(cudaSurfaceObject_t surface, Ray* dev_rays, PathState* dev_pathStates, int n, int width)
+__global__ void kernColorSurface(cudaSurfaceObject_t surface, PathState* dev_pathStates, int n, int width)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -77,10 +72,9 @@ __global__ void kernColorSurface(cudaSurfaceObject_t surface, Ray* dev_rays, Pat
         return;
     }
 
-    Ray currentRay = dev_rays[index];
     PathState currentPathState = dev_pathStates[index];
 
-    int pixelIndex = currentRay.pixelIndex;
+    int pixelIndex = currentPathState.pixelIndex;
 
     int pixelIndexX = 0;
     int pixelIndexY = 0;
@@ -95,7 +89,7 @@ __global__ void kernColorSurface(cudaSurfaceObject_t surface, Ray* dev_rays, Pat
     surf2Dwrite(pixelColor, surface, pixelIndexX * sizeof(uchar4), pixelIndexY);
 }
 
-__global__ void kernDebugRays(Ray* dev_rays, PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height)
+__global__ void kernDebugRays(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -105,17 +99,13 @@ __global__ void kernDebugRays(Ray* dev_rays, PathState* dev_pathStates, cudaSurf
     }
 
     int pixelIndex = y * width + x;
-    Ray ray = dev_rays[pixelIndex];
     PathState pathState = dev_pathStates[pixelIndex];
+    Ray ray = pathState.ray;
 
 
     float r = ray.direction.x * 0.5f + 0.5f;
     float g = ray.direction.y * 0.5f + 0.5f;
     float b = ray.direction.z * 0.5f + 0.5f;
-
-    r = pathState.accumulatedColor.r;
-    g = pathState.accumulatedColor.g;
-    b = pathState.accumulatedColor.b;
     
     uchar4 pixelColor;
     pixelColor.x = (unsigned char)(b * 255.0f); // Blue
@@ -141,41 +131,41 @@ __global__ void fillSurfaceColorKernel(cudaSurfaceObject_t surface, int width, i
     surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
 }
 
-void launchCameraRayGenKernel(Ray* dev_rays, PathState* dev_pathStates, int width, int height, glm::vec3 cameraPos, glm::vec3 cameraLook, glm::vec3 cameraRight, glm::vec3 cameraUp, float fovY)
+void launchCameraRayGenKernel(PathState* dev_pathStates, int width, int height, glm::vec3 cameraPos, glm::vec3 cameraLook, glm::vec3 cameraRight, glm::vec3 cameraUp, float fovY)
 {
     dim3 blockSize(16, 16);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
 
     kernGenerateCameraRays << <gridSize, blockSize >> > (
-        dev_rays, dev_pathStates, width, height,
+        dev_pathStates, width, height,
         cameraPos, cameraLook, cameraRight, cameraUp, fovY
         );
 }
 
-void launchIntersectKernel(Ray* dev_rays, PathState* dev_pathStates, int width, int height)
+void launchIntersectKernel(PathState* dev_pathStates, int width, int height)
 {
     int n = width * height;
     dim3 blockSize(32);
     dim3 gridSize(divup(n, blockSize.x));
 
-    kernIntersect << <gridSize, blockSize >> > (dev_rays, dev_pathStates, width * height);
+    kernIntersect << <gridSize, blockSize >> > (dev_pathStates, width * height);
 }
 
-void launchColorSurfaceKernel(Ray* dev_rays, PathState* dev_pathStates, int width, int height, cudaSurfaceObject_t surface)
+void launchColorSurfaceKernel(PathState* dev_pathStates, int width, int height, cudaSurfaceObject_t surface)
 {
     int n = width * height;
     dim3 blockSize(32);
     dim3 gridSize(divup(n, blockSize.x));
 
-    kernColorSurface<<<gridSize, blockSize>>>(surface, dev_rays, dev_pathStates, width * height, width);
+    kernColorSurface<<<gridSize, blockSize>>>(surface, dev_pathStates, width * height, width);
 }
 
-void launchDebugRaysKernel(Ray* dev_rays, PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height)
+void launchDebugRaysKernel( PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height)
 {
     dim3 blockSize(16, 16);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
 
-    kernDebugRays << <gridSize, blockSize >> > (dev_rays, dev_pathStates, surface, width, height);
+    kernDebugRays << <gridSize, blockSize >> > (dev_pathStates, surface, width, height);
 }
 
 void launchColorKernel(cudaSurfaceObject_t surface, int width, int height, float r, float g, float b) {
