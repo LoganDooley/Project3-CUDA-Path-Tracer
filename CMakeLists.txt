@@ -11,6 +11,10 @@ set(CMAKE_CUDA_ARCHITECTURES native)
 # CUDA Setup
 find_package(CUDAToolkit REQUIRED)
 
+# Thrust Setup
+find_package(Thrust REQUIRED CONFIG)
+thrust_create_target(Thrust)
+
 # GLFW Setup
 set(GLFW_BUILD_DOCS OFF CACHE INTERNAL "")
 set(GLFW_BUILD_TESTS OFF CACHE INTERNAL "")
@@ -55,6 +59,7 @@ PRIVATE
 	glm::glm
 	CUDA::cudart
 	CUDA::cuda_driver
+	Thrust
 )
 
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
