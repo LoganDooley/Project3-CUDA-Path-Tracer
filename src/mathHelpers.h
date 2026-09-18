@@ -1,0 +1,35 @@
+#pragma once
+
+#include <cuda_runtime.h>
+
+#include <cmath>
+
+class MathHelpers {
+public:
+	__host__ __device__ static bool solveQuadratic(const float& a, const float& b, const float& c, float& x1, float& x2) {
+		if (a == 0.0f) {
+			return false;
+		}
+
+		float discriminant = b * b - 4.0f * a * c;
+
+		if (discriminant < 0.0f) {
+			return false;
+		}
+
+		float q = -0.5f * (b + copysignf(sqrtf(discriminant), b));
+
+		x1 = q / a;
+		x2 = c / q;
+
+		return true;
+	}
+
+	__host__ __device__ static glm::vec3 safeNormalize(const glm::vec3 v) {
+		float lengthSquared = glm::dot(v, v);
+		if (lengthSquared > 0.0f) {
+			return v * glm::inversesqrt(lengthSquared);
+		}
+		return glm::vec3(0.0f);
+	}
+};

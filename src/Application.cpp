@@ -6,6 +6,8 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
 
+#include <cuda_runtime.h>
+
 #include <iostream>
 
 #include "kernel.h"
@@ -115,6 +117,13 @@ void Application::run() {
 			"Frame Times (ms)",
 			0.0f, 33.f,
 			ImVec2(0, 80));
+		// TODO: Don't query this every frame
+		size_t freeBytes = 0;
+		size_t totalBytes = 0;
+		cudaMemGetInfo(&freeBytes, &totalBytes);
+		size_t usedBytes = totalBytes - freeBytes;
+		double usedMB = usedBytes / (1024.0 * 1024.0);
+		ImGui::Text("Used CUDA Memory: %.2f MB", usedMB);
 		ImGui::End();
 
 		ImGui::Render();
