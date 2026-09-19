@@ -83,8 +83,12 @@ __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_i
 
     IntersectionData closestIntersection;
     for (int i = 0; i < geometryCount; i++) {
-        closestIntersection = IntersectionStatics::intersectGeometry(currentRay, dev_geometry[i]);
-        // TODO: Only keep closest intersection based on t value
+        IntersectionData intersection = IntersectionStatics::intersectGeometry(currentRay, dev_geometry[i]);
+        if (intersection.t > 0.0f) {
+            if (closestIntersection.t < 0.0f || intersection.t < closestIntersection.t) {
+                closestIntersection = intersection;
+            }
+        }
     }
 
     dev_intersectionData[index] = closestIntersection;
