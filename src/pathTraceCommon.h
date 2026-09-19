@@ -10,6 +10,13 @@ public:
 		return origin + t * direction;
 	}
 
+	__host__ __device__ Ray transform(const glm::mat4& transform) const {
+		Ray transformed;
+		transformed.origin = glm::vec3(transform * glm::vec4(origin, 1.0f));
+		transformed.direction = glm::vec3(transform * glm::vec4(direction, 0.0f));
+		return transformed;
+	}
+
 	glm::vec3 origin = glm::vec3(0.0f);
 	glm::vec3 direction = glm::vec3(1.0f, 0.0f, 0.0f);
 };
@@ -33,9 +40,12 @@ struct Geom
 {
 	enum GeomType type = GeomType::SPHERE;
 	int materialid = 0;
+
+	// TODO: Remove vec3s from device since these should be stored in the mat4s and are redundant
 	glm::vec3 translation = glm::vec3(0.0f);
 	glm::vec3 rotation = glm::vec3(0.0f);
 	glm::vec3 scale = glm::vec3(1.0f);
+
 	glm::mat4 transform = glm::mat4(1.0f);
 	glm::mat4 inverseTransform = glm::mat4(1.0f);
 	glm::mat4 invTranspose = glm::mat4(1.0f);
@@ -64,9 +74,27 @@ struct IntersectionData {
 class IntersectionStatics {
 public:
 	__device__ static IntersectionData intersectGeometry(const Ray& ray, const Geom& geometry) {
-		// TODO: Convert to geometry's space
-		return intersectSphere(ray);
-		// TODO: Convert intersection result back to world space
+		// Convert world space -> object spce
+		Ray objectSpaceRay = ray.transform(geometry.inverseTransform);
+		
+		// Run intersection
+		IntersectionData result = intersectSphere(ray);
+		
+		if (result.t <= 0.0f) {
+			return result;
+		}
+
+		result.materialIndex = geometry.materialid;
+
+		// Convert normal to world space
+		glm::vec4 worldNormal = geometry.invTranspose * glm::vec4(result.normal, 0.0f);
+		result.normal = MathHelpers::safeNormalize(glm::vec3(worldNormal));
+
+		// Convert t to world space
+		glm::vec3 worldPosition = glm::vec3(geometry.transform * glm::vec4(objectSpaceRay.getPositionAtTime(result.t), 1.0f));
+		result.t = glm::length(worldPosition - ray.origin);
+
+		return result;
 	}
 
 private:
@@ -98,7 +126,6 @@ private:
 
 		result.normal = MathHelpers::safeNormalize(ray.getPositionAtTime(t0));
 		result.t = t0;
-		result.materialIndex = 0;
 
 		return result;
 	}
