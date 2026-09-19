@@ -75,7 +75,7 @@ __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_i
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (index > n) {
+    if (index >= n) {
         return;
     }
 
@@ -94,7 +94,7 @@ __global__ void kernShade(PathState* dev_pathStates, IntersectionData* dev_inter
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (index > n) {
+    if (index >= n) {
         return;
     }
 
@@ -115,7 +115,7 @@ __global__ void kernColorSurface(cudaSurfaceObject_t surface, PathState* dev_pat
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (index > n) {
+    if (index >= n) {
         return;
     }
 

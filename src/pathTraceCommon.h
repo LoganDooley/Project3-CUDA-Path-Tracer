@@ -78,7 +78,7 @@ public:
 		Ray objectSpaceRay = ray.transform(geometry.inverseTransform);
 		
 		// Run intersection
-		IntersectionData result = intersectSphere(ray);
+		IntersectionData result = intersectSphere(objectSpaceRay);
 		
 		if (result.t <= 0.0f) {
 			return result;

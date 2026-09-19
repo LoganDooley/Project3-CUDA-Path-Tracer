@@ -24,6 +24,9 @@ add_subdirectory(external/glfw)
 # GLM Setup
 add_subdirectory(external/glm)
 
+# JSON Setup
+add_subdirectory(external/json)
+
 find_package(Vulkan REQUIRED)
 
 file(GLOB_RECURSE SOURCE_FILES
@@ -60,6 +63,7 @@ PRIVATE
 	CUDA::cudart
 	CUDA::cuda_driver
 	Thrust
+	nlohmann_json::nlohmann_json
 )
 
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
@@ -68,6 +72,14 @@ target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
         $<$<CONFIG:Debug>:-G> 
         --generate-line-info
     >
+)
+
+add_custom_command(
+    TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/scenes"
+            "$<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>/scenes"
+    COMMENT "Copying scene files to the build destination directory"
 )
 
 if(WIN32)

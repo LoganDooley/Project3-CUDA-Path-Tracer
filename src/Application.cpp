@@ -22,12 +22,12 @@ Application::Application() {
 	InitVulkan();
 
 	InitCUDAVulkanInterop();
-
+		
 	InitImGui();
 
 	m_previousFrameTime = glfwGetTime();
 
-	m_currentScene = SceneLoader::loadFromFile("");
+	m_currentScene = SceneLoader::loadFromFile("scenes/sphere.json");
 }
 
 Application::~Application() {
