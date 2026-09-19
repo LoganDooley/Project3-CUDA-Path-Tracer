@@ -5,6 +5,9 @@
 #include <cuda_runtime.h>
 
 #include "pathTraceCommon.h"
+#include "scene.h"
+
+#include <memory>
 
 class Renderer {
 public:
@@ -17,7 +20,7 @@ public:
 	void resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
 		vk::Extent2D extent, size_t allocationSize);
 
-	void render();
+	void render(const std::unique_ptr<Scene>& scene);
 
 private:
 	void cleanup();

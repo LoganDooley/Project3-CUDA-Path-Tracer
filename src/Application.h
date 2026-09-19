@@ -2,6 +2,7 @@
 
 #include "window.h"
 #include "renderer.h"
+#include "scene.h"
 
 #include <vulkan/vulkan_raii.hpp>
 #include <cuda.h>
@@ -32,6 +33,8 @@ private:
 	vk::raii::Context m_vkContext;
 	Window m_window;
 	Renderer m_renderer;
+
+	std::unique_ptr<Scene> m_currentScene = nullptr;
 
 	vk::raii::Instance m_vkInstance = nullptr;
 	vk::raii::SurfaceKHR m_vkSurface = nullptr;

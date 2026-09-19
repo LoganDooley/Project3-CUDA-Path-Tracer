@@ -31,28 +31,28 @@ enum GeomType
 
 struct Geom
 {
-	enum GeomType type;
-	int materialid;
-	glm::vec3 translation;
-	glm::vec3 rotation;
-	glm::vec3 scale;
-	glm::mat4 transform;
-	glm::mat4 inverseTransform;
-	glm::mat4 invTranspose;
+	enum GeomType type = GeomType::SPHERE;
+	int materialid = 0;
+	glm::vec3 translation = glm::vec3(0.0f);
+	glm::vec3 rotation = glm::vec3(0.0f);
+	glm::vec3 scale = glm::vec3(1.0f);
+	glm::mat4 transform = glm::mat4(1.0f);
+	glm::mat4 inverseTransform = glm::mat4(1.0f);
+	glm::mat4 invTranspose = glm::mat4(1.0f);
 };
 
 struct Material
 {
-	glm::vec3 color;
+	glm::vec3 color = glm::vec3(1.0, 0.0, 0.203);
 	struct
 	{
-		float exponent;
-		glm::vec3 color;
+		float exponent = 1.f;
+		glm::vec3 color = glm::vec3(0.0f);
 	} specular;
-	float hasReflective;
-	float hasRefractive;
-	float indexOfRefraction;
-	float emittance;
+	float hasReflective = -1.f;
+	float hasRefractive = -1.f;
+	float indexOfRefraction = 1.f;
+	float emittance = 0.f;
 };
 
 struct IntersectionData {
@@ -61,25 +61,25 @@ struct IntersectionData {
 	int materialIndex = 0;
 };
 
-struct Primitive {
-	__device__ virtual IntersectionData intersect(const Ray& ray) 
-	{
-		return IntersectionData{};
+class IntersectionStatics {
+public:
+	__device__ static IntersectionData intersectGeometry(const Ray& ray, const Geom& geometry) {
+		// TODO: Convert to geometry's space
+		return intersectSphere(ray);
+		// TODO: Convert intersection result back to world space
 	}
-};
 
-struct Sphere : public Primitive {
-	__device__ IntersectionData intersect(const Ray& ray) override
-	{
+private:
+	__device__ static IntersectionData intersectSphere(const Ray& ray) {
 		IntersectionData result = IntersectionData{};
 
 		float t0;
 		float t1;
 
-		glm::vec3 toRay = ray.origin - position;
+		glm::vec3 toRay = ray.origin;
 		float a = glm::dot(ray.direction, ray.direction);
 		float b = 2 * glm::dot(ray.direction, toRay);
-		float c = glm::dot(toRay, toRay) - radius * radius;
+		float c = glm::dot(toRay, toRay) - 0.5f * 0.5f;
 		if (!MathHelpers::solveQuadratic(a, b, c, t0, t1)) {
 			return result;
 		}
@@ -96,13 +96,10 @@ struct Sphere : public Primitive {
 			}
 		}
 
-		result.normal = MathHelpers::safeNormalize(ray.getPositionAtTime(t0) - position);
+		result.normal = MathHelpers::safeNormalize(ray.getPositionAtTime(t0));
 		result.t = t0;
 		result.materialIndex = 0;
 
 		return result;
 	}
-
-	glm::vec3 position = glm::vec3(0.0f);
-	float radius = 1.f;
 };

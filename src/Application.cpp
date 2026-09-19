@@ -26,6 +26,8 @@ Application::Application() {
 	InitImGui();
 
 	m_previousFrameTime = glfwGetTime();
+
+	m_currentScene = SceneLoader::loadFromFile("");
 }
 
 Application::~Application() {
@@ -128,7 +130,7 @@ void Application::run() {
 
 		ImGui::Render();
 
-		m_renderer.render();
+		m_renderer.render(m_currentScene);
 
 		currentCommandBuffer.reset();
 		currentCommandBuffer.begin(vk::CommandBufferBeginInfo{});

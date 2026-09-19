@@ -69,7 +69,9 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates, int width, int
 }
 
 __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_intersectionData,
-    int n)
+    int n,
+    Geom* dev_geometry,
+    int geometryCount)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -79,10 +81,13 @@ __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_i
 
     Ray currentRay = dev_pathStates[index].ray;
 
-    Sphere sceneSphere = Sphere{};
-    IntersectionData intersection = sceneSphere.intersect(currentRay);
+    IntersectionData closestIntersection;
+    for (int i = 0; i < geometryCount; i++) {
+        closestIntersection = IntersectionStatics::intersectGeometry(currentRay, dev_geometry[i]);
+        // TODO: Only keep closest intersection based on t value
+    }
 
-    dev_intersectionData[index] = intersection;
+    dev_intersectionData[index] = closestIntersection;
 }
 
 __global__ void kernShade(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int n)
@@ -184,13 +189,14 @@ void launchCameraRayGenKernel(PathState* dev_pathStates, int width, int height, 
         );
 }
 
-void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int width, int height)
+void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, Geom* dev_geometry,
+    int geometryCount, int width, int height)
 {
     int n = width * height;
     dim3 blockSize(32);
     dim3 gridSize(divup(n, blockSize.x));
 
-    kernIntersect << <gridSize, blockSize >> > (dev_pathStates, dev_intersectionData, width * height);
+    kernIntersect << <gridSize, blockSize >> > (dev_pathStates, dev_intersectionData, width * height, dev_geometry, geometryCount);
 }
 
 void launchShadeKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int width, int height)

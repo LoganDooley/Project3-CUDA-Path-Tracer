@@ -2,6 +2,9 @@
 
 #include "pathTraceCommon.h"
 
+#include <string>
+#include <memory>
+
 class Scene {
 public:
 	Scene();
@@ -13,7 +16,14 @@ public:
 	const Scene& operator=(Scene&&) noexcept;
 	Scene(Scene&&) noexcept;
 
-private:
-	Geom* dev_geometry;
-	Material* dev_materials;
+	Geom* dev_geometry = nullptr;
+	size_t m_geometryCount = 0;
+
+	Material* dev_materials = nullptr;
+	size_t m_materialCount = 0;
+};
+
+class SceneLoader {
+public:
+	static std::unique_ptr<Scene> loadFromFile(const std::string& filepath);
 };

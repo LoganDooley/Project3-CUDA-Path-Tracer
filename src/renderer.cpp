@@ -61,7 +61,7 @@ void Renderer::resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
     }
 }
 
-void Renderer::render()
+void Renderer::render(const std::unique_ptr<Scene>& scene)
 {
     if (m_cudaSurfaceObject == 0) {
         return;
@@ -79,7 +79,11 @@ void Renderer::render()
         cameraPos, cameraLook, cameraRight, cameraUp,
         fovY);
 
-    launchIntersectKernel(dev_pathStates, dev_intersectionData, m_extent.width, m_extent.height);
+    launchIntersectKernel(dev_pathStates, 
+        dev_intersectionData, 
+        scene ? scene->dev_geometry : nullptr, 
+        scene ? scene->m_geometryCount : 0, 
+        m_extent.width, m_extent.height);
 
     launchShadeKernel(dev_pathStates, dev_intersectionData, m_extent.width, m_extent.height);
 
