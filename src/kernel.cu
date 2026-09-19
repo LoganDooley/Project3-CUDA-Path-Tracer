@@ -3,6 +3,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/random.h>
 #include <thrust/remove.h>
+#include <thrust/device_ptr.h>
 
 #include "samplers.h"
 
@@ -34,6 +35,22 @@ __device__ void get2DIndex(int index1D, int width, int* outX, int* outY) {
     *outY = index1D / width;
 }
 
+__device__ void writePathStateToSurface(const PathState& pathState, cudaSurfaceObject_t surface, int width) {
+    int pixelIndex = pathState.pixelIndex;
+
+    int pixelIndexX = 0;
+    int pixelIndexY = 0;
+    get2DIndex(pixelIndex, width, &pixelIndexX, &pixelIndexY);
+
+    uchar4 pixelColor;
+    pixelColor.x = (unsigned char)(pathState.accumulatedColor.b * 255.0f); // Blue
+    pixelColor.y = (unsigned char)(pathState.accumulatedColor.g * 255.0f); // Green
+    pixelColor.z = (unsigned char)(pathState.accumulatedColor.r * 255.0f); // Red
+    pixelColor.w = 255;
+
+    surf2Dwrite(pixelColor, surface, pixelIndexX * sizeof(uchar4), pixelIndexY);
+}
+
 __global__ void kernGenerateCameraRays(PathState* dev_pathStates, int width, int height, glm::vec3 cameraPos, glm::vec3 cameraLook, glm::vec3 cameraRight, glm::vec3 cameraUp, float fovY)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -46,13 +63,7 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates, int width, int
     // row major pixel indexing
     int pixelIndex = y * width + x;
 
-    // Initialize path state
-    dev_pathStates[pixelIndex].throughput = glm::vec3(1.0f);
-    dev_pathStates[pixelIndex].accumulatedColor = glm::vec3(0.0f);
-    dev_pathStates[pixelIndex].bounceCount = 0;
-    dev_pathStates[pixelIndex].active = true;
-
-    //// Map to range [-1, 1]
+    // Map to range [-1, 1]
     float normalizedX = (2.0f * (x + 0.5f) / (float)width) - 1.0f;
     float normalizedY = 1.0f - (2.0f * (y + 0.5f) / (float)height);
 
@@ -63,25 +74,31 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates, int width, int
         (normalizedY * scale * cameraUp);
     rayDirection = glm::normalize(rayDirection);
 
-    PathState pathState = PathState{};
+
+    PathState pathState;
     pathState.ray.origin = cameraPos;
     pathState.ray.direction = rayDirection;
     pathState.pixelIndex = pixelIndex;
+    pathState.throughput = glm::vec3(1.0f);
+    pathState.accumulatedColor = glm::vec3(0.0f);
+    pathState.bounceCount = 0;
+    pathState.active = true;
+
     dev_pathStates[pixelIndex] = pathState;
 }
 
 __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_intersectionData,
-    int n,
+    int activePathCount,
     Geom* dev_geometry,
     int geometryCount)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (index >= n) {
+    if (index >= activePathCount) {
         return;
     }
 
-    // TODO: Use stream compaction rather than check here
+    // Stream compaction should catch this
     if (!dev_pathStates[index].active) {
         return;
     }
@@ -101,19 +118,22 @@ __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_i
     dev_intersectionData[index] = closestIntersection;
 }
 
-__global__ void kernShade(PathState* dev_pathStates, 
-    IntersectionData* dev_intersectionData, 
-    Material* dev_materials, 
+__global__ void kernShade(
+    PathState* dev_pathStates,
+    IntersectionData* dev_intersectionData,
+    Material* dev_materials,
     int materialCount,
-    int n)
+    int activePathCount,
+    cudaSurfaceObject_t surface,
+    int width)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (index >= n) {
+    if (index >= activePathCount) {
         return;
     }
 
-    // TODO: Use stream compaction rather than check here
+    // Stream compaction should catch this
     if (!dev_pathStates[index].active) {
         return;
     }
@@ -123,6 +143,7 @@ __global__ void kernShade(PathState* dev_pathStates,
         // Add environment lighting & mark terminated
         dev_pathStates[index].accumulatedColor += dev_pathStates[index].throughput * glm::vec3(0.0f, 0.3f, 0.7f);
         dev_pathStates[index].active = false;
+        writePathStateToSurface(dev_pathStates[index], surface, width);
         return;
     }
 
@@ -165,19 +186,7 @@ __global__ void kernColorSurface(cudaSurfaceObject_t surface, PathState* dev_pat
 
     PathState currentPathState = dev_pathStates[index];
 
-    int pixelIndex = currentPathState.pixelIndex;
-
-    int pixelIndexX = 0;
-    int pixelIndexY = 0;
-    get2DIndex(pixelIndex, width, &pixelIndexX, &pixelIndexY);
-
-    uchar4 pixelColor;
-    pixelColor.x = (unsigned char)(currentPathState.accumulatedColor.b * 255.0f); // Blue
-    pixelColor.y = (unsigned char)(currentPathState.accumulatedColor.g * 255.0f); // Green
-    pixelColor.z = (unsigned char)(currentPathState.accumulatedColor.r * 255.0f); // Red
-    pixelColor.w = 255;
-
-    surf2Dwrite(pixelColor, surface, pixelIndexX * sizeof(uchar4), pixelIndexY);
+    writePathStateToSurface(currentPathState, surface, width);
 }
 
 __global__ void kernDebugRays(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height)
@@ -234,35 +243,43 @@ void launchCameraRayGenKernel(PathState* dev_pathStates, int width, int height, 
 }
 
 void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, Geom* dev_geometry,
-    int geometryCount, int width, int height)
+    int geometryCount, int activePathCount)
 {
-    int n = width * height;
     dim3 blockSize(32);
-    dim3 gridSize(divup(n, blockSize.x));
+    dim3 gridSize(divup(activePathCount, blockSize.x));
 
-    kernIntersect << <gridSize, blockSize >> > (dev_pathStates, dev_intersectionData, width * height, dev_geometry, geometryCount);
+    kernIntersect << <gridSize, blockSize >> > (dev_pathStates, dev_intersectionData, activePathCount, dev_geometry, geometryCount);
 }
 
-void launchShadeKernel(PathState* dev_pathStates, 
-    IntersectionData* dev_intersectionData, 
-    Material* dev_materials, 
+void launchShadeKernel(PathState* dev_pathStates,
+    IntersectionData* dev_intersectionData,
+    Material* dev_materials,
     int materialCount,
-    int width, int height)
+    int activePathCount,
+    cudaSurfaceObject_t surface,
+    int width)
 {
-    int n = width * height;
     dim3 blockSize(32);
-    dim3 gridSize(divup(n, blockSize.x));
+    dim3 gridSize(divup(activePathCount, blockSize.x));
 
-    kernShade << <gridSize, blockSize >> > (dev_pathStates, dev_intersectionData, dev_materials, materialCount, width * height);
+    kernShade << <gridSize, blockSize >> > (dev_pathStates, 
+        dev_intersectionData, 
+        dev_materials, 
+        materialCount, 
+        activePathCount,
+        surface,
+        width);
 }
 
-void launchColorSurfaceKernel(PathState* dev_pathStates, int width, int height, cudaSurfaceObject_t surface)
+void launchColorSurfaceKernel(PathState* dev_pathStates,
+    int activePathCount,
+    cudaSurfaceObject_t surface,
+    int width)
 {
-    int n = width * height;
     dim3 blockSize(32);
-    dim3 gridSize(divup(n, blockSize.x));
+    dim3 gridSize(divup(activePathCount, blockSize.x));
 
-    kernColorSurface<<<gridSize, blockSize>>>(surface, dev_pathStates, width * height, width);
+    kernColorSurface<<<gridSize, blockSize>>>(surface, dev_pathStates, activePathCount, width);
 }
 
 void launchDebugRaysKernel( PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height)
@@ -278,4 +295,25 @@ void launchColorKernel(cudaSurfaceObject_t surface, int width, int height, float
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
 
     fillSurfaceColorKernel << <gridSize, blockSize >> > (surface, width, height, r, g, b);
+}
+
+struct is_path_terminated {
+    __host__ __device__
+        bool operator()(const PathState& pathState) const {
+        return !pathState.active;
+    }
+};
+
+int runStreamCompaction(PathState* dev_pathStates, int numActivePaths) {
+    thrust::device_ptr<PathState> th_pathStates_start(dev_pathStates);
+    thrust::device_ptr<PathState> th_pathStates_end = th_pathStates_start + numActivePaths;
+
+    thrust::device_ptr<PathState> th_new_end = thrust::remove_if(
+        thrust::device,
+        th_pathStates_start,
+        th_pathStates_end,
+        is_path_terminated()
+    );
+
+    return th_new_end - th_pathStates_start;
 }

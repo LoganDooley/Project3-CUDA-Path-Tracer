@@ -66,6 +66,11 @@ void Renderer::render(const std::unique_ptr<Scene>& scene)
     if (m_cudaSurfaceObject == 0) {
         return;
     }
+
+    int initialActivePathCount = m_extent.width * m_extent.height;
+    int currentActivePathCount = initialActivePathCount;
+    int maxBounces = 3;
+
     glm::vec3 cameraPos(0.0f, 0.0f, 3.0f);
     glm::vec3 cameraLook(0.0f, 0.0f, -1.0f);
     glm::vec3 cameraRight(1.0f, 0.0f, 0.0f);
@@ -79,18 +84,27 @@ void Renderer::render(const std::unique_ptr<Scene>& scene)
         cameraPos, cameraLook, cameraRight, cameraUp,
         fovY);
 
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < maxBounces; i++) {
+        if (currentActivePathCount <= 0) {
+            break;
+        }
+
         launchIntersectKernel(dev_pathStates,
             dev_intersectionData,
             scene ? scene->dev_geometry : nullptr,
             scene ? scene->m_geometryCount : 0,
-            m_extent.width, m_extent.height);
+            currentActivePathCount);
 
         launchShadeKernel(dev_pathStates,
             dev_intersectionData,
             scene ? scene->dev_materials : nullptr,
             scene ? scene->m_materialCount : 0,
-            m_extent.width, m_extent.height);
+            currentActivePathCount,
+            m_cudaSurfaceObject,
+            m_extent.width);
+
+        // Run stream compaction
+        currentActivePathCount = runStreamCompaction(dev_pathStates, currentActivePathCount);
     }
 
     launchColorSurfaceKernel(dev_pathStates, m_extent.width, m_extent.height, m_cudaSurfaceObject);

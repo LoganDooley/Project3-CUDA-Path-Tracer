@@ -17,7 +17,7 @@ __global__ void kernGenerateCameraRays(
 __global__ void kernIntersect(
 	PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData,
-	int n,
+	int activePathCount,
 	Geom* dev_geometry,
 	int geometryCount
 );
@@ -27,10 +27,12 @@ __global__ void kernShade(
 	IntersectionData* dev_intersectionData,
 	Material* dev_materials,
 	int materialCount,
-	int n
+	int activePathCount,
+	cudaSurfaceObject_t surface,
+	int width
 );
 
-__global__ void kernColorSurface(cudaSurfaceObject_t surface, PathState* dev_pathStates, int n, int width);
+__global__ void kernColorSurface(cudaSurfaceObject_t surface, PathState* dev_pathStates, int activePathCount, int width);
 
 __global__ void kernDebugRays(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height);
 
@@ -47,18 +49,23 @@ void launchCameraRayGenKernel(PathState* dev_pathStates,
 void launchIntersectKernel(PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData, Geom* dev_geometry,
 	int geometryCount,
-	int width, int height);
+	int activePathCount);
 
 void launchShadeKernel(PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData,
 	Material* dev_materials,
 	int materialCount,
-	int width, int height);
+	int activePathCount,
+	cudaSurfaceObject_t surface,
+	int width);
 
 void launchColorSurfaceKernel(PathState* dev_pathStates,
-	int width, int height,
-	cudaSurfaceObject_t surface);
+	int activePathCount,
+	cudaSurfaceObject_t surface,
+	int width);
 
 void launchDebugRaysKernel(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height);
 
 void launchColorKernel(cudaSurfaceObject_t surface, int width, int height, float r, float g, float b);
+
+int runStreamCompaction(PathState* dev_pathStates, int numActivePaths);
