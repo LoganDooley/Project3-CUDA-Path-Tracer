@@ -25,6 +25,8 @@ __global__ void kernIntersect(
 __global__ void kernShade(
 	PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData,
+	Material* dev_materials,
+	int materialCount,
 	int n
 );
 
@@ -49,6 +51,8 @@ void launchIntersectKernel(PathState* dev_pathStates,
 
 void launchShadeKernel(PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData,
+	Material* dev_materials,
+	int materialCount,
 	int width, int height);
 
 void launchColorSurfaceKernel(PathState* dev_pathStates,

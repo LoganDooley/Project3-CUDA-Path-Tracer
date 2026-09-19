@@ -79,13 +79,19 @@ void Renderer::render(const std::unique_ptr<Scene>& scene)
         cameraPos, cameraLook, cameraRight, cameraUp,
         fovY);
 
-    launchIntersectKernel(dev_pathStates, 
-        dev_intersectionData, 
-        scene ? scene->dev_geometry : nullptr, 
-        scene ? scene->m_geometryCount : 0, 
-        m_extent.width, m_extent.height);
+    for (int i = 0; i < 3; i++) {
+        launchIntersectKernel(dev_pathStates,
+            dev_intersectionData,
+            scene ? scene->dev_geometry : nullptr,
+            scene ? scene->m_geometryCount : 0,
+            m_extent.width, m_extent.height);
 
-    launchShadeKernel(dev_pathStates, dev_intersectionData, m_extent.width, m_extent.height);
+        launchShadeKernel(dev_pathStates,
+            dev_intersectionData,
+            scene ? scene->dev_materials : nullptr,
+            scene ? scene->m_materialCount : 0,
+            m_extent.width, m_extent.height);
+    }
 
     launchColorSurfaceKernel(dev_pathStates, m_extent.width, m_extent.height, m_cudaSurfaceObject);
 

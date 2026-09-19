@@ -4,6 +4,8 @@
 #include <thrust/random.h>
 #include <thrust/remove.h>
 
+#include "samplers.h"
+
 __host__ __device__ inline unsigned int utilhash(unsigned int a)
 {
     a = (a + 0x7ed55d16) + (a << 12);
@@ -79,6 +81,11 @@ __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_i
         return;
     }
 
+    // TODO: Use stream compaction rather than check here
+    if (!dev_pathStates[index].active) {
+        return;
+    }
+
     Ray currentRay = dev_pathStates[index].ray;
 
     IntersectionData closestIntersection;
@@ -94,7 +101,11 @@ __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_i
     dev_intersectionData[index] = closestIntersection;
 }
 
-__global__ void kernShade(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int n)
+__global__ void kernShade(PathState* dev_pathStates, 
+    IntersectionData* dev_intersectionData, 
+    Material* dev_materials, 
+    int materialCount,
+    int n)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -102,17 +113,46 @@ __global__ void kernShade(PathState* dev_pathStates, IntersectionData* dev_inter
         return;
     }
 
+    // TODO: Use stream compaction rather than check here
+    if (!dev_pathStates[index].active) {
+        return;
+    }
+
     IntersectionData intersectionData = dev_intersectionData[index];
     if (intersectionData.t <= 0.0f) {
+        // Add environment lighting & mark terminated
+        dev_pathStates[index].accumulatedColor += dev_pathStates[index].throughput * glm::vec3(0.0f, 0.3f, 0.7f);
+        dev_pathStates[index].active = false;
         return;
     }
 
     thrust::default_random_engine rng = makeSeededRandomEngine(index, index, 0);
     thrust::uniform_real_distribution<float> u01(0, 1);
 
-    PathState pathState = dev_pathStates[index];
+    if (intersectionData.materialIndex >= materialCount) {
+        dev_pathStates[index].active = false;
+        return;
+    }
 
-    dev_pathStates[index].accumulatedColor = pathState.throughput * intersectionData.normal * u01(rng);
+    Material material = dev_materials[intersectionData.materialIndex];
+
+    // Add emissive
+    dev_pathStates[index].accumulatedColor += dev_pathStates[index].throughput * material.color * material.emittance;
+
+    // Generate diffuse ray direction
+    glm::vec2 random = glm::vec2(u01(rng), u01(rng));
+    glm::vec3 outgoingDirection = Samplers::sampleWorldUniformHemisphere(intersectionData.normal, random);
+    
+    // Compute cosTheta * brdf / pdf
+    float cosTheta = glm::max(0.0f, glm::dot(intersectionData.normal, outgoingDirection));
+    float pdf = 1.0f / (2.0f * glm::pi<float>());
+    glm::vec3 brdf = material.color / glm::pi<float>();
+    dev_pathStates[index].throughput *= (brdf * cosTheta) / pdf;
+
+    // Update ray for next iteration
+    const float EPSILON = 0.001f;
+    dev_pathStates[index].ray.origin = dev_pathStates[index].ray.getPositionAtTime(intersectionData.t) + intersectionData.normal * EPSILON;
+    dev_pathStates[index].ray.direction = outgoingDirection;
 }
 
 __global__ void kernColorSurface(cudaSurfaceObject_t surface, PathState* dev_pathStates, int n, int width)
@@ -203,13 +243,17 @@ void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_inte
     kernIntersect << <gridSize, blockSize >> > (dev_pathStates, dev_intersectionData, width * height, dev_geometry, geometryCount);
 }
 
-void launchShadeKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int width, int height)
+void launchShadeKernel(PathState* dev_pathStates, 
+    IntersectionData* dev_intersectionData, 
+    Material* dev_materials, 
+    int materialCount,
+    int width, int height)
 {
     int n = width * height;
     dim3 blockSize(32);
     dim3 gridSize(divup(n, blockSize.x));
 
-    kernShade << <gridSize, blockSize >> > (dev_pathStates, dev_intersectionData, width * height);
+    kernShade << <gridSize, blockSize >> > (dev_pathStates, dev_intersectionData, dev_materials, materialCount, width * height);
 }
 
 void launchColorSurfaceKernel(PathState* dev_pathStates, int width, int height, cudaSurfaceObject_t surface)

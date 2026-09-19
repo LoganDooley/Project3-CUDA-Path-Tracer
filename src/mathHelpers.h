@@ -33,7 +33,7 @@ public:
 		return glm::vec3(0.0f);
 	}
 
-	__host__ __device__ void createCoordinateSystem(const glm::vec3& inNormal, glm::vec3& outTangent, glm::vec3& outBitangent) {
+	__host__ __device__ static void createCoordinateSystem(const glm::vec3& inNormal, glm::vec3& outTangent, glm::vec3& outBitangent) {
 		float sign = std::copysign(1.0f, inNormal.z);
 		const float a = -1.0f / (sign + inNormal.z);
 		const float b = inNormal.x * inNormal.y * a;

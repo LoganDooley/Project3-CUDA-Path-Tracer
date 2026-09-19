@@ -2,6 +2,8 @@
 
 #include <cuda_runtime.h>
 
+#include <glm/gtc/constants.hpp>
+
 #include "mathHelpers.h"
 
 class Samplers {
