@@ -78,7 +78,13 @@ public:
 		Ray objectSpaceRay = ray.transform(geometry.inverseTransform);
 		
 		// Run intersection
-		IntersectionData result = intersectSphere(objectSpaceRay);
+		IntersectionData result;
+		if (geometry.type == GeomType::SPHERE) {
+			result = intersectSphere(objectSpaceRay);
+		}
+		else {
+			result = intersectBox(objectSpaceRay);
+		}
 		
 		if (result.t <= 0.0f) {
 			return result;
@@ -126,6 +132,50 @@ private:
 
 		result.normal = MathHelpers::safeNormalize(ray.getPositionAtTime(t0));
 		result.t = t0;
+
+		return result;
+	}
+
+	__device__ static IntersectionData intersectBox(const Ray& ray) {
+		IntersectionData result = IntersectionData{};
+
+		glm::vec3 boxMin(-0.5f);
+		glm::vec3 boxMax(0.5f);
+
+		// Using slab method for fast aabb
+		glm::vec3 invDirection = 1.0f / ray.direction;
+
+		glm::vec3 tMin = (boxMin - ray.origin) * invDirection;
+		glm::vec3 tMax = (boxMax - ray.origin) * invDirection;
+
+		glm::vec3 tNear = (glm::min)(tMin, tMax);
+		glm::vec3 tFar = (glm::max)(tMin, tMax);
+
+		float t0 = (glm::max)(tNear.x, (glm::max)(tNear.y, tNear.z));
+		float t1 = (glm::min)(tFar.x, (glm::min)(tFar.y, tFar.z));
+
+		// Check for miss
+		if (t0 > t1 || t1 < 0.0f) {
+			return result;
+		}
+
+		float tHit = (t0 < 0.0f) ? t1 : t0;
+		if (tHit < 0.0f) {
+			return result;
+		}
+
+		result.t = tHit;
+
+		result.normal = glm::vec3(0.0f);
+		if (tHit == tNear.x) {
+			result.normal.x = (ray.direction.x > 0.0f) ? -1.0f : 1.0f;
+		}
+		else if (tHit == tNear.y) {
+			result.normal.y = (ray.direction.y > 0.0f) ? -1.0f : 1.0f;
+		}
+		else {
+			result.normal.z = (ray.direction.z > 0.0f) ? -1.0f : 1.0f;
+		}
 
 		return result;
 	}
