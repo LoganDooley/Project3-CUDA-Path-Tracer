@@ -10,10 +10,10 @@ public:
 	Scene();
 	~Scene();
 
-	const Scene& operator=(const Scene&) = delete;
+	Scene& operator=(const Scene&) = delete;
 	Scene(const Scene&) = delete;
 
-	const Scene& operator=(Scene&&) noexcept;
+	Scene& operator=(Scene&&) noexcept;
 	Scene(Scene&&) noexcept;
 
 	Geom* dev_geometry = nullptr;

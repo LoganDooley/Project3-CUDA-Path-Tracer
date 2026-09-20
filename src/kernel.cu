@@ -125,7 +125,8 @@ __global__ void kernShade(
     int materialCount,
     int activePathCount,
     cudaSurfaceObject_t surface,
-    int width)
+    int width,
+    int iteration)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -147,7 +148,7 @@ __global__ void kernShade(
         return;
     }
 
-    thrust::default_random_engine rng = makeSeededRandomEngine(index, index, 0);
+    thrust::default_random_engine rng = makeSeededRandomEngine(iteration, index, 0);
     thrust::uniform_real_distribution<float> u01(0, 1);
 
     if (intersectionData.materialIndex >= materialCount) {
@@ -231,15 +232,14 @@ __global__ void fillSurfaceColorKernel(cudaSurfaceObject_t surface, int width, i
     surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
 }
 
-void launchCameraRayGenKernel(PathState* dev_pathStates, int width, int height, glm::vec3 cameraPos, glm::vec3 cameraLook, glm::vec3 cameraRight, glm::vec3 cameraUp, float fovY)
+void launchCameraRayGenKernel(PathState* dev_pathStates, int width, int height, const Camera& camera)
 {
     dim3 blockSize(16, 16);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
 
     kernGenerateCameraRays << <gridSize, blockSize >> > (
         dev_pathStates, width, height,
-        cameraPos, cameraLook, cameraRight, cameraUp, fovY
-        );
+        camera.m_position, camera.m_look, camera.m_right, camera.m_up, camera.m_fovy);
 }
 
 void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, Geom* dev_geometry,
@@ -257,7 +257,8 @@ void launchShadeKernel(PathState* dev_pathStates,
     int materialCount,
     int activePathCount,
     cudaSurfaceObject_t surface,
-    int width)
+    int width,
+    int iteration)
 {
     dim3 blockSize(32);
     dim3 gridSize(divup(activePathCount, blockSize.x));
@@ -268,7 +269,8 @@ void launchShadeKernel(PathState* dev_pathStates,
         materialCount, 
         activePathCount,
         surface,
-        width);
+        width,
+        iteration);
 }
 
 void launchColorSurfaceKernel(PathState* dev_pathStates,

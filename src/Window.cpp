@@ -1,5 +1,7 @@
 #include "window.h"
 
+#include "application.h"
+
 #include <stdexcept>
 
 Window::Window(int width, int height, const char* title) {
@@ -9,8 +11,6 @@ Window::Window(int width, int height, const char* title) {
 	if (!m_glfwWindow) {
 		throw std::runtime_error("Failed to create GLFW window");
 	}
-
-	glfwSetWindowUserPointer(m_glfwWindow, this);
 
 	glfwSetFramebufferSizeCallback(m_glfwWindow, FramebufferResizeCallback);
 }
@@ -39,9 +39,9 @@ void Window::getFramebufferSize(int* width, int* height)
 
 void Window::FramebufferResizeCallback(GLFWwindow* glfwWindow, int width, int height)
 {
-	auto window = reinterpret_cast<Window*>(glfwGetWindowUserPointer(glfwWindow));
-	if (window) {
-		window->m_hasBeenResized = true;
+	auto application = reinterpret_cast<Application*>(glfwGetWindowUserPointer(glfwWindow));
+	if (application) {
+		application->getWindow().m_hasBeenResized = true;
 	}
 }
 

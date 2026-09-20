@@ -38,7 +38,7 @@ Scene::~Scene()
     }
 }
 
-const Scene& Scene::operator=(Scene&& other) noexcept
+Scene& Scene::operator=(Scene&& other) noexcept
 {
     if (this != &other) {
         if (dev_geometry) {

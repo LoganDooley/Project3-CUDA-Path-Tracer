@@ -4,6 +4,7 @@
 #include <device_launch_parameters.h>
 
 #include "pathTraceCommon.h"
+#include "camera.h"
 
 __global__ void kernGenerateCameraRays(
 	PathState* dev_pathStates,
@@ -29,7 +30,8 @@ __global__ void kernShade(
 	int materialCount,
 	int activePathCount,
 	cudaSurfaceObject_t surface,
-	int width
+	int width,
+	int iteration
 );
 
 __global__ void kernColorSurface(cudaSurfaceObject_t surface, PathState* dev_pathStates, int activePathCount, int width);
@@ -40,11 +42,7 @@ __global__ void fillSurfaceColorKernel(cudaSurfaceObject_t surface, int width, i
 
 void launchCameraRayGenKernel(PathState* dev_pathStates,
 	int width, int height,
-	glm::vec3 cameraPos,
-	glm::vec3 cameraLook,
-	glm::vec3 cameraRight,
-	glm::vec3 cameraUp,
-	float fovY);
+	const Camera& camera);
 
 void launchIntersectKernel(PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData, Geom* dev_geometry,
@@ -57,7 +55,8 @@ void launchShadeKernel(PathState* dev_pathStates,
 	int materialCount,
 	int activePathCount,
 	cudaSurfaceObject_t surface,
-	int width);
+	int width,
+	int iteration);
 
 void launchColorSurfaceKernel(PathState* dev_pathStates,
 	int activePathCount,

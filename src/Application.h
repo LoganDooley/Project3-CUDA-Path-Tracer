@@ -3,6 +3,8 @@
 #include "window.h"
 #include "renderer.h"
 #include "scene.h"
+#include "camera.h"
+#include "inputState.h"
 
 #include <vulkan/vulkan_raii.hpp>
 #include <cuda.h>
@@ -15,13 +17,15 @@ public:
 	Application();
 	~Application();
 
-	const Application& operator=(const Application&) = delete;
+	Application& operator=(const Application&) = delete;
 	Application(const Application&) = delete;
 
-	const Application& operator=(Application&&) = delete;
+	Application& operator=(Application&&) = delete;
 	Application(Application&&) = delete;
 
 	void run();
+
+	Window& getWindow() { return m_window; }
 
 private:
 	void InitVulkan();
@@ -33,6 +37,8 @@ private:
 	vk::raii::Context m_vkContext;
 	Window m_window;
 	Renderer m_renderer;
+	Camera m_camera;
+	InputState m_inputState;
 
 	std::unique_ptr<Scene> m_currentScene = nullptr;
 

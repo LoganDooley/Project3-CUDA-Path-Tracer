@@ -61,7 +61,7 @@ void Renderer::resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
     }
 }
 
-void Renderer::render(const std::unique_ptr<Scene>& scene)
+void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera)
 {
     if (m_cudaSurfaceObject == 0) {
         return;
@@ -71,18 +71,11 @@ void Renderer::render(const std::unique_ptr<Scene>& scene)
     int currentActivePathCount = initialActivePathCount;
     int maxBounces = 3;
 
-    glm::vec3 cameraPos(0.0f, 0.0f, 3.0f);
-    glm::vec3 cameraLook(0.0f, 0.0f, -1.0f);
-    glm::vec3 cameraRight(1.0f, 0.0f, 0.0f);
-    glm::vec3 cameraUp(0.0f, 1.0f, 0.0f);
-    float fovY = 45.f;
-
     launchCameraRayGenKernel(
         dev_pathStates,
         m_extent.width,
         m_extent.height,
-        cameraPos, cameraLook, cameraRight, cameraUp,
-        fovY);
+        camera);
 
     for (int i = 0; i < maxBounces; i++) {
         if (currentActivePathCount <= 0) {
@@ -101,7 +94,8 @@ void Renderer::render(const std::unique_ptr<Scene>& scene)
             scene ? scene->m_materialCount : 0,
             currentActivePathCount,
             m_cudaSurfaceObject,
-            m_extent.width);
+            m_extent.width,
+            i);
 
         // Run stream compaction
         currentActivePathCount = runStreamCompaction(dev_pathStates, currentActivePathCount);

@@ -19,6 +19,46 @@ Application::Application() {
 
 	m_window = Window(800, 600, "CUDA-Vulkan Path Tracer");
 
+	glfwSetWindowUserPointer(m_window.GetGLFWwindow(), this);
+
+	glfwSetKeyCallback(m_window.GetGLFWwindow(), [](GLFWwindow* window, int key, int scancode, int action, int mods) {
+		auto* app = static_cast<Application*>(glfwGetWindowUserPointer(window));
+		if (!app) {
+			return;
+		}
+
+		if (action == GLFW_PRESS) {
+			app->m_inputState.setKeyPressed(key, true);
+		}
+		if (action == GLFW_RELEASE) {
+			app->m_inputState.setKeyPressed(key, false);
+		}
+		});
+
+	glfwSetMouseButtonCallback(m_window.GetGLFWwindow(), [](GLFWwindow* window, int button, int action, int mods) {
+		auto* app = static_cast<Application*>(glfwGetWindowUserPointer(window));
+		if (!app) {
+			return;
+		}
+
+		if (action == GLFW_PRESS) {
+			app->m_inputState.setMouseButtonPressed(button, true);
+		}
+		if (action == GLFW_RELEASE) {
+			app->m_inputState.setMouseButtonPressed(button, false);
+		}
+		});
+
+	glfwSetCursorPosCallback(m_window.GetGLFWwindow(), [](GLFWwindow* window, double xpos, double ypos) {
+		auto* app = static_cast<Application*>(glfwGetWindowUserPointer(window));
+		if (!app) {
+			return;
+		}
+
+		app->m_inputState.m_mousePosition = glm::vec2(xpos, ypos);
+		});
+
+
 	InitVulkan();
 
 	InitCUDAVulkanInterop();
@@ -27,7 +67,7 @@ Application::Application() {
 
 	m_previousFrameTime = glfwGetTime();
 
-	m_currentScene = SceneLoader::loadFromFile("scenes/sphere.json");
+	m_currentScene = SceneLoader::loadFromFile("scenes/cornell.json");
 }
 
 Application::~Application() {
@@ -130,7 +170,11 @@ void Application::run() {
 
 		ImGui::Render();
 
-		m_renderer.render(m_currentScene);
+		// Update camera
+		m_camera.tick(deltaTime, m_inputState);
+
+		// Render scene
+		m_renderer.render(m_currentScene, m_camera);
 
 		currentCommandBuffer.reset();
 		currentCommandBuffer.begin(vk::CommandBufferBeginInfo{});
