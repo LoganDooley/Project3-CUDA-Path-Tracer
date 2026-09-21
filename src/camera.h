@@ -16,7 +16,8 @@ public:
 	Camera& operator=(Camera&&) noexcept = default;
 	Camera(Camera&&) noexcept = default;
 
-	void tick(float deltaTime, const InputState& inputState);
+	// Returns true if the camera moved
+	bool tick(float deltaTime, const InputState& inputState);
 
 	glm::vec3 m_position = glm::vec3(0.0f, 0.0f, 3.0f);
 	glm::vec3 m_look = glm::vec3(0.0f, 0.0f, -1.0f);

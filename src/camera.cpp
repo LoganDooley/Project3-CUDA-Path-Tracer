@@ -13,7 +13,7 @@ Camera::Camera(glm::vec3 eye, glm::vec3 lookAt, glm::vec3 up, float fovy)
 	m_fovy = fovy;
 }
 
-void Camera::tick(float deltaTime, const InputState& inputState)
+bool Camera::tick(float deltaTime, const InputState& inputState)
 {
 	glm::vec3 moveDirection = glm::vec3(0.0f);
 	if (inputState.isKeyPressed(GLFW_KEY_W)) {
@@ -37,5 +37,10 @@ void Camera::tick(float deltaTime, const InputState& inputState)
 
 	moveDirection = MathHelpers::safeNormalize(moveDirection);
 
+	if (moveDirection == glm::vec3(0.0f)) {
+		return false;
+	}
+
 	m_position += m_moveSpeed * deltaTime * moveDirection;
+	return true;
 }

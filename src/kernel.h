@@ -30,11 +30,19 @@ __global__ void kernShade(
 	int materialCount,
 	int activePathCount,
 	cudaSurfaceObject_t surface,
+	glm::vec3* dev_accumulatedColor,
+	unsigned int* dev_sampleCounts,
 	int width,
 	int iteration
 );
 
-__global__ void kernColorSurface(cudaSurfaceObject_t surface, PathState* dev_pathStates, int activePathCount, int width);
+__global__ void kernColorSurface(
+	cudaSurfaceObject_t surface, 
+	glm::vec3* dev_accumulatedColor,
+	unsigned int* dev_sampleCounts, 
+	PathState* dev_pathStates, 
+	int activePathCount, 
+	int width);
 
 __global__ void kernDebugRays(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height);
 
@@ -55,16 +63,20 @@ void launchShadeKernel(PathState* dev_pathStates,
 	int materialCount,
 	int activePathCount,
 	cudaSurfaceObject_t surface,
+	glm::vec3* dev_accumulatedColor,
+	unsigned int* dev_sampleCounts,
 	int width,
 	int iteration);
 
 void launchColorSurfaceKernel(PathState* dev_pathStates,
 	int activePathCount,
 	cudaSurfaceObject_t surface,
+	glm::vec3* dev_accumulatedColor,
+	unsigned int* dev_sampleCounts,
 	int width);
 
 void launchDebugRaysKernel(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height);
 
 void launchColorKernel(cudaSurfaceObject_t surface, int width, int height, float r, float g, float b);
 
-int runStreamCompaction(PathState* dev_pathStates, int numActivePaths);
+int runStreamCompaction(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int numActivePaths);

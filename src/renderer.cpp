@@ -59,15 +59,32 @@ void Renderer::resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
     if (cudaMalloc((void**)&dev_intersectionData, getPixelCount() * sizeof(IntersectionData)) != cudaSuccess) {
         throw std::runtime_error("CUDA Failed to allocate dev_intersectionData");
     }
+
+    if (cudaMalloc((void**)&dev_sampleCounts, getPixelCount() * sizeof(unsigned int)) != cudaSuccess) {
+        throw std::runtime_error("CUDA Failed to allocate dev_sampleCounts");
+    }
+
+    if (cudaMalloc((void**)&dev_accumulatedColor, getPixelCount() * sizeof(glm::vec3)) != cudaSuccess) {
+        throw std::runtime_error("CUDA Failed to allocate dev_accumulatedColor");
+    }
+
+    cudaMemset(dev_sampleCounts, 0, getPixelCount() * sizeof(unsigned int));
+
+    cudaMemset(dev_accumulatedColor, 0, getPixelCount() * sizeof(glm::vec3));
 }
 
-void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera)
+void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera, bool bClearAccumulatedSamples)
 {
     if (m_cudaSurfaceObject == 0) {
         return;
     }
 
-    int initialActivePathCount = m_extent.width * m_extent.height;
+    if (bClearAccumulatedSamples) {
+        cudaMemset(dev_sampleCounts, 0, getPixelCount() * sizeof(unsigned int));
+        cudaMemset(dev_accumulatedColor, 0.0f, getPixelCount() * sizeof(glm::vec3));
+    }
+
+    int initialActivePathCount = getPixelCount();
     int currentActivePathCount = initialActivePathCount;
     int maxBounces = 3;
 
@@ -94,14 +111,23 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera)
             scene ? scene->m_materialCount : 0,
             currentActivePathCount,
             m_cudaSurfaceObject,
+            dev_accumulatedColor,
+            dev_sampleCounts,
             m_extent.width,
             i);
 
         // Run stream compaction
-        currentActivePathCount = runStreamCompaction(dev_pathStates, currentActivePathCount);
+        currentActivePathCount = runStreamCompaction(dev_pathStates, dev_intersectionData, currentActivePathCount);
     }
 
-    launchColorSurfaceKernel(dev_pathStates, m_extent.width, m_extent.height, m_cudaSurfaceObject);
+    if (currentActivePathCount > 0) {
+        launchColorSurfaceKernel(dev_pathStates, 
+            currentActivePathCount, 
+            m_cudaSurfaceObject, 
+            dev_accumulatedColor,
+            dev_sampleCounts, 
+            m_extent.width);
+    }
 
     cudaDeviceSynchronize();
 }
@@ -130,6 +156,16 @@ void Renderer::cleanup()
     if (dev_intersectionData) {
         cudaFree(dev_intersectionData);
         dev_intersectionData = nullptr;
+    }
+
+    if (dev_sampleCounts) {
+        cudaFree(dev_sampleCounts);
+        dev_sampleCounts = nullptr;
+    }
+
+    if (dev_accumulatedColor) {
+        cudaFree(dev_accumulatedColor);
+        dev_sampleCounts = nullptr;
     }
 
     m_activeRayCount = 0;

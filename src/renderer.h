@@ -21,7 +21,7 @@ public:
 	void resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
 		vk::Extent2D extent, size_t allocationSize);
 
-	void render(const std::unique_ptr<Scene>& scene, const Camera& camera);
+	void render(const std::unique_ptr<Scene>& scene, const Camera& camera, bool bClearAccumulatedSamples);
 
 private:
 	void cleanup();
@@ -37,6 +37,8 @@ private:
 
 	PathState* dev_pathStates = nullptr;
 	IntersectionData* dev_intersectionData = nullptr;
+	unsigned int* dev_sampleCounts = nullptr;
+	glm::vec3* dev_accumulatedColor = nullptr;
 
 	int m_activeRayCount = 0;
 };

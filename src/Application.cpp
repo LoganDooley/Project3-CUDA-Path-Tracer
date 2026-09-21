@@ -171,10 +171,10 @@ void Application::run() {
 		ImGui::Render();
 
 		// Update camera
-		m_camera.tick(deltaTime, m_inputState);
+		bool bMoved = m_camera.tick(deltaTime, m_inputState);
 
 		// Render scene
-		m_renderer.render(m_currentScene, m_camera);
+		m_renderer.render(m_currentScene, m_camera, bMoved);
 
 		currentCommandBuffer.reset();
 		currentCommandBuffer.begin(vk::CommandBufferBeginInfo{});
