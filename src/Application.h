@@ -34,6 +34,10 @@ private:
 
 	void recreateSwapchain();
 
+	void renderImGui();
+
+	void pickSceneFile();
+
 	vk::raii::Context m_vkContext;
 	Window m_window;
 	Renderer m_renderer;

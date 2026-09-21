@@ -6,6 +6,8 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
 
+#include "nfd.hpp"
+
 #include <cuda_runtime.h>
 
 #include <iostream>
@@ -155,25 +157,7 @@ void Application::run() {
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
 
-		ImGui::Begin("Test Window");
-		ImGui::Text("Performance Stats:");
-		ImGui::Text("FPS: %.1f", currentFps);
-		ImGui::Text("Frame Time: %.2f ms", currentFrameTimeMs);
-		ImGui::PlotLines("##FrameTimeGraph",
-			m_frameTimeHistory.data(),
-			static_cast<int>(m_frameTimeHistory.size()),
-			static_cast<int>(m_historyOffset),
-			"Frame Times (ms)",
-			0.0f, 33.f,
-			ImVec2(0, 80));
-		// TODO: Don't query this every frame
-		size_t freeBytes = 0;
-		size_t totalBytes = 0;
-		cudaMemGetInfo(&freeBytes, &totalBytes);
-		size_t usedBytes = totalBytes - freeBytes;
-		double usedMB = usedBytes / (1024.0 * 1024.0);
-		ImGui::Text("Used CUDA Memory: %.2f MB", usedMB);
-		ImGui::End();
+		renderImGui();
 
 		ImGui::Render();
 
@@ -712,4 +696,54 @@ void Application::recreateSwapchain()
 	}
 
 	InitCUDAVulkanInterop();
+}
+
+void Application::renderImGui()
+{
+	float currentFrameTimeMs = m_frameTimeHistory[m_historyOffset];
+	float currentFps = 1000.f / currentFrameTimeMs;
+
+	ImGui::Begin("Test Window");
+	if(ImGui::Button("Load Scene File")) {
+		pickSceneFile();
+	}
+	ImGui::Text("Performance Stats:");
+	ImGui::Text("FPS: %.1f", currentFps);
+	ImGui::Text("Frame Time: %.2f ms", currentFrameTimeMs);
+	ImGui::PlotLines("##FrameTimeGraph",
+		m_frameTimeHistory.data(),
+		static_cast<int>(m_frameTimeHistory.size()),
+		static_cast<int>(m_historyOffset),
+		"Frame Times (ms)",
+		0.0f, 33.f,
+		ImVec2(0, 80));
+	// TODO: Don't query this every frame
+	size_t freeBytes = 0;
+	size_t totalBytes = 0;
+	cudaMemGetInfo(&freeBytes, &totalBytes);
+	size_t usedBytes = totalBytes - freeBytes;
+	double usedMB = usedBytes / (1024.0 * 1024.0);
+	ImGui::Text("Used CUDA Memory: %.2f MB", usedMB);
+	ImGui::End();
+}
+
+void Application::pickSceneFile()
+{
+	NFD::Guard nfdGuard;
+	nfdfilteritem_t filterItem[1] = {
+		{ "Scene Files",
+		"json" }
+	};
+	NFD::UniquePath outPath;
+
+	nfdresult_t result = NFD::OpenDialog(outPath, filterItem, 1, "Scene Files");
+
+	if (result != NFD_OKAY) {
+		return;
+	}
+
+	std::string sceneFilePath = outPath.get();
+
+	m_currentScene = SceneLoader::loadFromFile(sceneFilePath);
+	m_camera.m_hasMoved = true;
 }

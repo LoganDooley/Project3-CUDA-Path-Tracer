@@ -27,6 +27,9 @@ add_subdirectory(external/glm)
 # JSON Setup
 add_subdirectory(external/json)
 
+# Native File Dialogs Setup
+add_subdirectory(external/NFDe)
+
 find_package(Vulkan REQUIRED)
 
 file(GLOB_RECURSE SOURCE_FILES
@@ -68,6 +71,7 @@ PRIVATE
 	CUDA::cuda_driver
 	Thrust
 	nlohmann_json::nlohmann_json
+	nfd
 )
 
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
