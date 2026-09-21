@@ -72,7 +72,15 @@ __device__ void writePathStateToSurface(const PathState& pathState,
     surf2Dwrite(pixelColor, surface, pixelIndexX * sizeof(uchar4), pixelIndexY);
 }
 
-__global__ void kernGenerateCameraRays(PathState* dev_pathStates, int width, int height, glm::vec3 cameraPos, glm::vec3 cameraLook, glm::vec3 cameraRight, glm::vec3 cameraUp, float fovY)
+__global__ void kernGenerateCameraRays(PathState* dev_pathStates, 
+    int width, 
+    int height, 
+    glm::vec3 cameraPos, 
+    glm::vec3 cameraLook, 
+    glm::vec3 cameraRight, 
+    glm::vec3 cameraUp, 
+    float fovY, 
+    int frameIndex)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -84,9 +92,16 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates, int width, int
     // row major pixel indexing
     int pixelIndex = y * width + x;
 
+    // Add antialiasing by jittering the ray
+    thrust::default_random_engine rng = makeSeededRandomEngine(frameIndex, pixelIndex, 0);
+    thrust::uniform_real_distribution<float> u01(0, 1);
+
+    float jitterX = u01(rng) - 0.5f;
+    float jitterY = u01(rng) - 0.5f;
+
     // Map to range [-1, 1]
-    float normalizedX = (2.0f * (x + 0.5f) / (float)width) - 1.0f;
-    float normalizedY = 1.0f - (2.0f * (y + 0.5f) / (float)height);
+    float normalizedX = (2.0f * (x + 0.5f + jitterX) / (float)width) - 1.0f;
+    float normalizedY = 1.0f - (2.0f * (y + 0.5f + jitterY) / (float)height);
 
     float aspectRatio = (float)width / (float)height;
     float scale = tanf(glm::radians(fovY) * 0.5f);
@@ -283,14 +298,15 @@ __global__ void fillSurfaceColorKernel(cudaSurfaceObject_t surface, int width, i
     surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
 }
 
-void launchCameraRayGenKernel(PathState* dev_pathStates, int width, int height, const Camera& camera)
+void launchCameraRayGenKernel(PathState* dev_pathStates, int width, int height, const Camera& camera, int frameIndex)
 {
     dim3 blockSize(16, 16);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
 
     kernGenerateCameraRays << <gridSize, blockSize >> > (
         dev_pathStates, width, height,
-        camera.m_position, camera.m_look, camera.m_right, camera.m_up, camera.m_fovy);
+        camera.m_position, camera.m_look, camera.m_right, camera.m_up, camera.m_fovy, 
+        frameIndex);
 }
 
 void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, Geom* dev_geometry,

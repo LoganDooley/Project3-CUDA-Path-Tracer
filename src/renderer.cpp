@@ -93,7 +93,8 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera,
         dev_pathStates,
         m_extent.width,
         m_extent.height,
-        camera);
+        camera,
+        m_frameIndex);
 
     for (int i = 0; i < maxBounces; i++) {
         if (currentActivePathCount <= 0) {
