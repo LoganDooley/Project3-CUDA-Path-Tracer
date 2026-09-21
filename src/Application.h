@@ -38,6 +38,8 @@ private:
 
 	void pickSceneFile();
 
+	void saveCurrentRender();
+
 	vk::raii::Context m_vkContext;
 	Window m_window;
 	Renderer m_renderer;

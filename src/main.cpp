@@ -4,9 +4,6 @@
 #include <glm/glm.hpp>
 #include <glm/vec3.hpp>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
-
 #include "application.h"
 
 int main() {

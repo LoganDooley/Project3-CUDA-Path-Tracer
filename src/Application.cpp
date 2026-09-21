@@ -707,6 +707,9 @@ void Application::renderImGui()
 	if(ImGui::Button("Load Scene File")) {
 		pickSceneFile();
 	}
+	if (ImGui::Button("Save Render to File")) {
+		saveCurrentRender();
+	}
 	ImGui::Text("Performance Stats:");
 	ImGui::Text("FPS: %.1f", currentFps);
 	ImGui::Text("Frame Time: %.2f ms", currentFrameTimeMs);
@@ -746,4 +749,25 @@ void Application::pickSceneFile()
 
 	m_currentScene = SceneLoader::loadFromFile(sceneFilePath);
 	m_camera.m_hasMoved = true;
+}
+
+void Application::saveCurrentRender()
+{
+	NFD::Guard nfdGuard;
+	nfdfilteritem_t filterItem[1] = {
+		{ "PNG Image",
+		"png" }
+	};
+	NFD::UniquePath outPath;
+
+	nfdresult_t result = NFD::SaveDialog(outPath, filterItem, 1, "render.png");
+
+	if (result != NFD_OKAY) {
+		return;
+	}
+
+	std::string saveFilePath = outPath.get();
+
+	m_renderer.saveCurrentRenderToFile(saveFilePath);
+
 }

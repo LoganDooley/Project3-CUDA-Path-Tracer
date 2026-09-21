@@ -1,5 +1,11 @@
 #include "renderer.h"
 
+#include "stb_image_write.h"
+
+#include <vector>
+#include <algorithm>
+#include <cmath>
+
 #include "kernel.h"
 
 Renderer::Renderer() {
@@ -135,6 +141,54 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera,
     m_frameIndex++;
 
     cudaDeviceSynchronize();
+}
+
+void Renderer::saveCurrentRenderToFile(const std::string& filepath)
+{
+    int numPixels = getPixelCount();
+    if (numPixels <= 0) {
+        return;
+    }
+
+    // Copy buffer of accumulated 
+    std::vector<glm::vec3> cpuAccumulatedColor(numPixels);
+    std::vector<unsigned int> cpuSampleCounts(numPixels);
+
+    if (cudaMemcpy(cpuAccumulatedColor.data(), dev_accumulatedColor, numPixels * sizeof(glm::vec3), cudaMemcpyDeviceToHost) != cudaSuccess) {
+        throw std::runtime_error("CUDA failed to copy dev_accumulatedColor to the cpu");
+    }
+
+    if (cudaMemcpy(cpuSampleCounts.data(), dev_sampleCounts, numPixels * sizeof(unsigned int), cudaMemcpyDeviceToHost) != cudaSuccess) {
+        throw std::runtime_error("CUDA failed to copy dev_sampleCounts to the cpu");
+    }
+
+    // Convert to format readable by stb image
+    std::vector<uint8_t> outputImage(numPixels * 3);
+
+    for (int i = 0; i < numPixels; i++) {
+        unsigned int samples = cpuSampleCounts[i];
+        glm::vec3 accumulatedColor = cpuAccumulatedColor[i];
+
+        glm::vec3 color = glm::vec3(0.0f);
+
+        if (samples > 0) {
+            color = accumulatedColor / static_cast<float>(samples);
+        }
+
+        // Gamma correct like in the path tracer
+        float r = std::clamp(std::pow(color.x, 1.0f / 2.2f), 0.0f, 1.0f);
+        float g = std::clamp(std::pow(color.y, 1.0f / 2.2f), 0.0f, 1.0f);
+        float b = std::clamp(std::pow(color.z, 1.0f / 2.2f), 0.0f, 1.0f);
+
+        // Write into output image buffer
+        outputImage[i * 3 + 0] = static_cast<uint8_t>(r * 255.99f);
+        outputImage[i * 3 + 1] = static_cast<uint8_t>(g * 255.99f);
+        outputImage[i * 3 + 2] = static_cast<uint8_t>(b * 255.99f);
+    }
+
+    stbi_flip_vertically_on_write(false);
+
+    stbi_write_png(filepath.c_str(), m_extent.width, m_extent.height, 3, outputImage.data(), m_extent.width * 3);
 }
 
 void Renderer::cleanup()

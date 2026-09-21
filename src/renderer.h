@@ -23,6 +23,8 @@ public:
 
 	void render(const std::unique_ptr<Scene>& scene, const Camera& camera, bool bClearAccumulatedSamples);
 
+	void saveCurrentRenderToFile(const std::string& filepath);
+
 private:
 	void cleanup();
 
