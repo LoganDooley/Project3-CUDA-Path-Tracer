@@ -10,6 +10,8 @@
 
 #include "samplers.h"
 
+#define MIN_RUSSIAN_ROULETTE_BOUNCES 2
+
 __host__ __device__ inline unsigned int utilhash(unsigned int a)
 {
     a = (a + 0x7ed55d16) + (a << 12);
@@ -162,26 +164,45 @@ __global__ void kernShade(
     }
 
     IntersectionData intersectionData = dev_intersectionData[index];
+
+    PathState& pathState = dev_pathStates[index];
+
     if (intersectionData.t <= 0.0f) {
         // Add environment lighting & mark terminated
         //dev_pathStates[index].accumulatedColor += dev_pathStates[index].throughput * glm::vec3(0.0f, 0.3f, 0.7f);
-        dev_pathStates[index].active = false;
-        writePathStateToSurface(dev_pathStates[index], surface, dev_accumulatedColor, dev_sampleCounts, width);
+        pathState.active = false;
+        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
         return;
     }
 
-    thrust::default_random_engine rng = makeSeededRandomEngine(iteration, index, frameIndex);
-    thrust::uniform_real_distribution<float> u01(0, 1);
-
     if (intersectionData.materialIndex >= materialCount) {
-        dev_pathStates[index].active = false;
+        pathState.active = false;
         return;
     }
 
     Material material = dev_materials[intersectionData.materialIndex];
 
     // Add emissive
-    dev_pathStates[index].accumulatedColor += dev_pathStates[index].throughput * material.color * material.emittance;
+    pathState.accumulatedColor += pathState.throughput * material.color * material.emittance;
+
+    thrust::default_random_engine rng = makeSeededRandomEngine(iteration, index, frameIndex);
+    thrust::uniform_real_distribution<float> u01(0, 1);
+
+    // Run russian roulette
+    if (pathState.bounceCount >= MIN_RUSSIAN_ROULETTE_BOUNCES) {
+        float survivalProbability = glm::max(pathState.throughput.x, glm::max(pathState.throughput.y, pathState.throughput.z));
+        survivalProbability = glm::clamp(survivalProbability, 0.05f, 0.95f);
+
+        if (u01(rng) > survivalProbability) {
+            // Terminate path
+            pathState.active = false;
+            writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
+            return;
+        }
+
+        // Compensate for survival probability
+        pathState.throughput /= survivalProbability;
+    }
 
     // Generate diffuse ray direction
     glm::vec2 random = glm::vec2(u01(rng), u01(rng));
@@ -191,12 +212,15 @@ __global__ void kernShade(
     float cosTheta = glm::max(0.0f, glm::dot(intersectionData.normal, outgoingDirection));
     float pdf = cosTheta / glm::pi<float>();
     glm::vec3 brdf = material.color / glm::pi<float>();
-    dev_pathStates[index].throughput *= (brdf * cosTheta) / pdf;
+    pathState.throughput *= (brdf * cosTheta) / pdf;
 
     // Update ray for next iteration
     const float EPSILON = 0.001f;
-    dev_pathStates[index].ray.origin = dev_pathStates[index].ray.getPositionAtTime(intersectionData.t) + intersectionData.normal * EPSILON;
-    dev_pathStates[index].ray.direction = outgoingDirection;
+    pathState.ray.origin = pathState.ray.getPositionAtTime(intersectionData.t) + intersectionData.normal * EPSILON;
+    pathState.ray.direction = outgoingDirection;
+
+    // Increment bounce count
+    pathState.bounceCount += 1;
 }
 
 __global__ void kernColorSurface(cudaSurfaceObject_t surface, 
