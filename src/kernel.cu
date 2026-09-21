@@ -147,7 +147,8 @@ __global__ void kernShade(
     glm::vec3* dev_accumulatedColor,
     unsigned int* dev_sampleCounts,
     int width,
-    int iteration)
+    int iteration,
+    int frameIndex)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -169,7 +170,7 @@ __global__ void kernShade(
         return;
     }
 
-    thrust::default_random_engine rng = makeSeededRandomEngine(iteration, index, 0);
+    thrust::default_random_engine rng = makeSeededRandomEngine(iteration, index, frameIndex);
     thrust::uniform_real_distribution<float> u01(0, 1);
 
     if (intersectionData.materialIndex >= materialCount) {
@@ -184,11 +185,11 @@ __global__ void kernShade(
 
     // Generate diffuse ray direction
     glm::vec2 random = glm::vec2(u01(rng), u01(rng));
-    glm::vec3 outgoingDirection = Samplers::sampleWorldUniformHemisphere(intersectionData.normal, random);
+    glm::vec3 outgoingDirection = Samplers::sampleCosineWeightedHemisphere(intersectionData.normal, random);
     
     // Compute cosTheta * brdf / pdf
     float cosTheta = glm::max(0.0f, glm::dot(intersectionData.normal, outgoingDirection));
-    float pdf = 1.0f / (2.0f * glm::pi<float>());
+    float pdf = cosTheta / glm::pi<float>();
     glm::vec3 brdf = material.color / glm::pi<float>();
     dev_pathStates[index].throughput *= (brdf * cosTheta) / pdf;
 
@@ -286,7 +287,8 @@ void launchShadeKernel(PathState* dev_pathStates,
     glm::vec3* dev_accumulatedColor,
     unsigned int* dev_sampleCounts,
     int width,
-    int iteration)
+    int iteration,
+    int frameIndex)
 {
     dim3 blockSize(32);
     dim3 gridSize(divup(activePathCount, blockSize.x));
@@ -300,7 +302,8 @@ void launchShadeKernel(PathState* dev_pathStates,
         dev_accumulatedColor,
         dev_sampleCounts,
         width,
-        iteration);
+        iteration,
+        frameIndex);
 }
 
 void launchColorSurfaceKernel(PathState* dev_pathStates,

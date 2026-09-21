@@ -33,7 +33,8 @@ __global__ void kernShade(
 	glm::vec3* dev_accumulatedColor,
 	unsigned int* dev_sampleCounts,
 	int width,
-	int iteration
+	int iteration,
+	int frameIndex
 );
 
 __global__ void kernColorSurface(
@@ -66,7 +67,8 @@ void launchShadeKernel(PathState* dev_pathStates,
 	glm::vec3* dev_accumulatedColor,
 	unsigned int* dev_sampleCounts,
 	int width,
-	int iteration);
+	int iteration,
+	int frameIndex);
 
 void launchColorSurfaceKernel(PathState* dev_pathStates,
 	int activePathCount,

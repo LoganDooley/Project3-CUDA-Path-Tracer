@@ -82,6 +82,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera,
     if (bClearAccumulatedSamples) {
         cudaMemset(dev_sampleCounts, 0, getPixelCount() * sizeof(unsigned int));
         cudaMemset(dev_accumulatedColor, 0.0f, getPixelCount() * sizeof(glm::vec3));
+        m_frameIndex = 0;
     }
 
     int initialActivePathCount = getPixelCount();
@@ -114,7 +115,8 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera,
             dev_accumulatedColor,
             dev_sampleCounts,
             m_extent.width,
-            i);
+            i,
+            m_frameIndex);
 
         // Run stream compaction
         currentActivePathCount = runStreamCompaction(dev_pathStates, dev_intersectionData, currentActivePathCount);
@@ -128,6 +130,8 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera,
             dev_sampleCounts, 
             m_extent.width);
     }
+
+    m_frameIndex++;
 
     cudaDeviceSynchronize();
 }

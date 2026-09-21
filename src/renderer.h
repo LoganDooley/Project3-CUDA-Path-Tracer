@@ -41,4 +41,6 @@ private:
 	glm::vec3* dev_accumulatedColor = nullptr;
 
 	int m_activeRayCount = 0;
+
+	int m_frameIndex = 0;
 };
