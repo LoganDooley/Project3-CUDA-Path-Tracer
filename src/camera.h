@@ -16,8 +16,8 @@ public:
 	Camera& operator=(Camera&&) noexcept = default;
 	Camera(Camera&&) noexcept = default;
 
-	// Returns true if the camera moved
-	bool tick(float deltaTime, const InputState& inputState);
+	void tick(float deltaTime, const InputState& inputState);
+	void rotate(const glm::vec2& mouseDelta);
 
 	glm::vec3 m_position = glm::vec3(0.0f, 0.0f, 3.0f);
 	glm::vec3 m_look = glm::vec3(0.0f, 0.0f, -1.0f);
@@ -25,7 +25,7 @@ public:
 	glm::vec3 m_right = glm::vec3(1.0f, 0.0f, 0.0f);
 	float m_fovy = 45.0f;
 	float m_moveSpeed = 2.0f;
+	float m_rotateSpeed = 0.002f;
 
-private:
-	glm::vec2 m_prevMousePosition = glm::vec2(0.0f);
+	bool m_hasMoved = false;
 };

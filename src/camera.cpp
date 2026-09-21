@@ -1,6 +1,7 @@
 #include "camera.h"
 
 #include <glfw/glfw3.h>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include "mathHelpers.h"
 
@@ -13,7 +14,7 @@ Camera::Camera(glm::vec3 eye, glm::vec3 lookAt, glm::vec3 up, float fovy)
 	m_fovy = fovy;
 }
 
-bool Camera::tick(float deltaTime, const InputState& inputState)
+void Camera::tick(float deltaTime, const InputState& inputState)
 {
 	glm::vec3 moveDirection = glm::vec3(0.0f);
 	if (inputState.isKeyPressed(GLFW_KEY_W)) {
@@ -37,10 +38,33 @@ bool Camera::tick(float deltaTime, const InputState& inputState)
 
 	moveDirection = MathHelpers::safeNormalize(moveDirection);
 
-	if (moveDirection == glm::vec3(0.0f)) {
-		return false;
+	if (moveDirection != glm::vec3(0.0f)) {
+		m_position += m_moveSpeed * deltaTime * moveDirection;
+		m_hasMoved = true;
+	}
+}
+
+void Camera::rotate(const glm::vec2& mouseDelta)
+{
+	if (mouseDelta.x == 0.0f && mouseDelta.y == 0.0f) {
+		return;
 	}
 
-	m_position += m_moveSpeed * deltaTime * moveDirection;
-	return true;
+	float yawAngle = -mouseDelta.x * m_rotateSpeed;
+	float pitchAngle = -mouseDelta.y * m_rotateSpeed;
+
+	const glm::vec3 globalUp = glm::vec3(0.0f, 1.0f, 0.0f);
+
+	// Rotate look horizontally (yaw)
+	glm::mat4 yawRotateMatrix = glm::rotate(glm::mat4(1.0f), yawAngle, globalUp);
+	m_look = glm::normalize(glm::vec3(yawRotateMatrix * glm::vec4(m_look, 0.0f)));
+
+	// Rotate look vertically (pitch)
+	glm::mat4 pitchRotateMatrix = glm::rotate(glm::mat4(1.0f), pitchAngle, m_right);
+	m_look = glm::normalize(glm::vec3(pitchRotateMatrix * glm::vec4(m_look, 0.0f)));
+
+	m_right = glm::normalize(glm::cross(m_look, globalUp));
+	m_up = glm::normalize(glm::cross(m_right, m_look));
+
+	m_hasMoved = true;
 }

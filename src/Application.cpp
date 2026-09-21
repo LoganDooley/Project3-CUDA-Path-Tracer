@@ -55,7 +55,14 @@ Application::Application() {
 			return;
 		}
 
+		if (app->m_inputState.isMouseButtonPressed(GLFW_MOUSE_BUTTON_RIGHT)) {
+			glm::vec2 deltaMousePosition = glm::vec2(xpos, ypos) - app->m_inputState.m_mousePosition;
+			app->m_camera.rotate(deltaMousePosition);
+		}
+
 		app->m_inputState.m_mousePosition = glm::vec2(xpos, ypos);
+
+
 		});
 
 
@@ -171,10 +178,13 @@ void Application::run() {
 		ImGui::Render();
 
 		// Update camera
-		bool bMoved = m_camera.tick(deltaTime, m_inputState);
+		m_camera.tick(deltaTime, m_inputState);
 
 		// Render scene
-		m_renderer.render(m_currentScene, m_camera, bMoved);
+		m_renderer.render(m_currentScene, m_camera, m_camera.m_hasMoved);
+
+		// Clear camera has moved
+		m_camera.m_hasMoved = false;
 
 		currentCommandBuffer.reset();
 		currentCommandBuffer.begin(vk::CommandBufferBeginInfo{});
