@@ -9,6 +9,7 @@
 #include <thrust/partition.h>
 
 #include "samplers.h"
+#include "shadingMaterial.h"
 
 #define MIN_RUSSIAN_ROULETTE_BOUNCES 2
 
@@ -221,13 +222,33 @@ __global__ void kernShade(
 
     // Generate diffuse ray direction
     glm::vec2 random = glm::vec2(u01(rng), u01(rng));
-    glm::vec3 outgoingDirection = Samplers::sampleCosineWeightedHemisphere(intersectionData.normal, random);
-    
-    // Compute cosTheta * brdf / pdf
-    float cosTheta = glm::max(0.0f, glm::dot(intersectionData.normal, outgoingDirection));
-    float pdf = cosTheta / glm::pi<float>();
-    glm::vec3 brdf = material.color / glm::pi<float>();
-    pathState.throughput *= (brdf * cosTheta) / pdf;
+    glm::vec3 outgoingDirection = glm::vec3(0.0f);
+    glm::vec3 brdfWeight = glm::vec3(0.0f);
+    glm::vec3 wi = -pathState.ray.direction;
+
+    bool bUseSpecular = (material.specular.color.x > 0.0f || material.specular.color.y > 0.0f || material.specular.color.z > 0.0f);
+
+    if (bUseSpecular) {
+        brdfWeight = ShadingMaterial::evaluateGlossySpecularMaterial(material,
+            intersectionData.normal,
+            wi,
+            random,
+            outgoingDirection);
+    }
+    else {
+        brdfWeight = ShadingMaterial::evaluateDiffuseMaterial(material,
+            intersectionData.normal,
+            random,
+            outgoingDirection);
+    }
+
+    // Did brdf return a valid value
+    if (brdfWeight.x <= 0.0f && brdfWeight.y <= 0.0f && brdfWeight.z <= 0.0f) {
+        pathState.active = false;
+        return;
+    }
+
+    pathState.throughput *= brdfWeight;
 
     // Update ray for next iteration
     const float EPSILON = 0.001f;

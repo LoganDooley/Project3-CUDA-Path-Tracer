@@ -48,6 +48,8 @@ file(GLOB IMGUI_SOURCES
 
 add_executable(cis565_path_tracer ${SOURCE_FILES} ${IMGUI_SOURCES})
 
+set_target_properties(cis565_path_tracer PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 	src/
 	external/stb/
