@@ -61,3 +61,46 @@ __device__ glm::vec3 ShadingMaterial::evaluateGlossySpecularMaterial(const Mater
 
 	return ((brdfSpecular + brdfDiffuse) * cosTheta) / pdf;
 }
+
+__device__ glm::vec3 ShadingMaterial::evaluatePerfectSpecularMaterial(const Material& material, const glm::vec3& normal, const glm::vec3& wi, float random, bool bInside, glm::vec3& outOutgoingDirection, float& outEpsilonSign)
+{
+	// Flip direction for glm reflect + refract
+	glm::vec3 incident = -wi;
+	glm::vec3 hitNormal = normal;
+
+	// Entering vs. exiting
+	float iorIn = 1.0f;
+	float iorOut = material.indexOfRefraction;
+
+	if (bInside) {
+		// Going from inside to out
+		iorIn = material.indexOfRefraction;
+		iorOut = 1.0f;
+	}
+
+	float iorRatio = iorIn / iorOut;
+	float dotNV = glm::max(0.0f, glm::dot(hitNormal, wi));
+
+	float r0 = (iorIn - iorOut) / (iorIn + iorOut);
+	r0 = r0 * r0;
+	float fresnel = r0 + (1.0f - r0) * glm::pow(1.0f - dotNV, 5.0f);
+
+	// Refract
+	glm::vec3 refracted = glm::refract(incident, hitNormal, iorRatio);
+
+	bool bTotalInternalReflection = (glm::dot(refracted, refracted) <= 0.0f);
+	bool bReflect = (random < fresnel) || bTotalInternalReflection;
+
+	if (material.hasRefractive > 0.0f && !bReflect) {
+		outOutgoingDirection = refracted;
+
+		outEpsilonSign = -1.0f;
+	}
+	else {
+		outOutgoingDirection = glm::reflect(incident, hitNormal);
+
+		outEpsilonSign = 1.0f;
+	}
+
+	return material.color;
+}

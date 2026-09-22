@@ -93,7 +93,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera,
 
     int initialActivePathCount = getPixelCount();
     int currentActivePathCount = initialActivePathCount;
-    int maxBounces = 3;
+    int maxBounces = 6;
 
     launchCameraRayGenKernel(
         dev_pathStates,

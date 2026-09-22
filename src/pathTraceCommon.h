@@ -67,8 +67,9 @@ struct Material
 
 struct IntersectionData {
 	glm::vec3 normal = glm::vec3(1, 0, 0);
-	float t = -1;
+	float t = -1.0f;
 	int materialIndex = 0;
+	bool bInside = false;
 };
 
 class IntersectionStatics {
@@ -128,10 +129,18 @@ private:
 			if (t0 < 0.0f) {
 				return result;
 			}
+			result.bInside = true;
+		}
+		else {
+			result.bInside = false;
 		}
 
 		result.normal = MathHelpers::safeNormalize(ray.getPositionAtTime(t0));
 		result.t = t0;
+
+		// Flip the normal if we were inside
+		float normalSign = result.bInside ? -1.0f : 1.0f;
+		result.normal *= normalSign;
 
 		return result;
 	}
@@ -159,23 +168,33 @@ private:
 			return result;
 		}
 
-		float tHit = (t0 < 0.0f) ? t1 : t0;
-		if (tHit < 0.0f) {
+		if (t0 < 0.0f) {
+			result.t = t1;
+			result.bInside = true;
+		}
+		else {
+			result.t = t0;
+			result.bInside = false;
+		}
+
+		if (result.t < 0.0f) {
 			return result;
 		}
 
-		result.t = tHit;
-
 		result.normal = glm::vec3(0.0f);
-		if (tHit == tNear.x) {
+		if (result.t == tNear.x) {
 			result.normal.x = (ray.direction.x > 0.0f) ? -1.0f : 1.0f;
 		}
-		else if (tHit == tNear.y) {
+		else if (result.t == tNear.y) {
 			result.normal.y = (ray.direction.y > 0.0f) ? -1.0f : 1.0f;
 		}
 		else {
 			result.normal.z = (ray.direction.z > 0.0f) ? -1.0f : 1.0f;
 		}
+
+		// Flip the normal if we were inside
+		float normalSign = result.bInside ? -1.0f : 1.0f;
+		result.normal *= normalSign;
 
 		return result;
 	}

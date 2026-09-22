@@ -142,7 +142,7 @@ __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_i
 
     Ray currentRay = dev_pathStates[index].ray;
 
-    IntersectionData closestIntersection;
+    IntersectionData closestIntersection = IntersectionData{};
     for (int i = 0; i < geometryCount; i++) {
         IntersectionData intersection = IntersectionStatics::intersectGeometry(currentRay, dev_geometry[i]);
         if (intersection.t > 0.0f) {
@@ -226,9 +226,22 @@ __global__ void kernShade(
     glm::vec3 brdfWeight = glm::vec3(0.0f);
     glm::vec3 wi = -pathState.ray.direction;
 
+    float epsilonSign = 1.0f;
+
+    bool bUseReflectRefract = (material.hasReflective > 0.0f || material.hasRefractive > 0.0f);
+
     bool bUseSpecular = (material.specular.color.x > 0.0f || material.specular.color.y > 0.0f || material.specular.color.z > 0.0f);
 
-    if (bUseSpecular) {
+    if (bUseReflectRefract) {
+        brdfWeight = ShadingMaterial::evaluatePerfectSpecularMaterial(material,
+            intersectionData.normal,
+            wi,
+            random.x,
+            intersectionData.bInside,
+            outgoingDirection,
+            epsilonSign);
+    }
+    else if (bUseSpecular) {
         brdfWeight = ShadingMaterial::evaluateGlossySpecularMaterial(material,
             intersectionData.normal,
             wi,
@@ -252,7 +265,7 @@ __global__ void kernShade(
 
     // Update ray for next iteration
     const float EPSILON = 0.001f;
-    pathState.ray.origin = pathState.ray.getPositionAtTime(intersectionData.t) + intersectionData.normal * EPSILON;
+    pathState.ray.origin = pathState.ray.getPositionAtTime(intersectionData.t) + intersectionData.normal * epsilonSign * EPSILON;
     pathState.ray.direction = outgoingDirection;
 
     // Increment bounce count

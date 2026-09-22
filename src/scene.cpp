@@ -98,10 +98,17 @@ std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath)
                 mat.emittance = data.value("EMITTANCE", 0.0f);
             }
             else if (type == "Specular") {
-                mat.hasReflective = 1.0f;
                 float roughness = data.value("ROUGHNESS", 0.0f);
                 mat.specular.exponent = glm::mix(1000.0f, 1.0f, roughness);
                 mat.specular.color = mat.color;
+            }
+            else if (type == "Mirror") {
+                mat.hasReflective = 1.0f;
+            }
+            else if (type == "Glass") {
+                mat.hasRefractive = 1.0f;
+                mat.indexOfRefraction = data.value("IOR", 1.5f);
+                mat.hasReflective = 1.0f;
             }
 
             materials.push_back(mat);
