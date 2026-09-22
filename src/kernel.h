@@ -5,6 +5,9 @@
 
 #include "pathTraceCommon.h"
 #include "camera.h"
+#include "scene.h"
+
+#include <memory>
 
 __global__ void kernGenerateCameraRays(
 	PathState* dev_pathStates,
@@ -20,15 +23,13 @@ __global__ void kernIntersect(
 	PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData,
 	int activePathCount,
-	Geom* dev_geometry,
-	int geometryCount
+	DevScene dev_scene
 );
 
 __global__ void kernShade(
 	PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData,
-	Material* dev_materials,
-	int materialCount,
+	DevScene dev_scene,
 	int activePathCount,
 	cudaSurfaceObject_t surface,
 	glm::vec3* dev_accumulatedColor,
@@ -56,14 +57,13 @@ void launchCameraRayGenKernel(PathState* dev_pathStates,
 	int frameIndex);
 
 void launchIntersectKernel(PathState* dev_pathStates,
-	IntersectionData* dev_intersectionData, Geom* dev_geometry,
-	int geometryCount,
+	IntersectionData* dev_intersectionData, 
+	const std::unique_ptr<Scene>& scene,
 	int activePathCount);
 
 void launchShadeKernel(PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData,
-	Material* dev_materials,
-	int materialCount,
+	const std::unique_ptr<Scene>& scene,
 	int activePathCount,
 	cudaSurfaceObject_t surface,
 	glm::vec3* dev_accumulatedColor,

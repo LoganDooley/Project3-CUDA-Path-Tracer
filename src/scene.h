@@ -2,6 +2,8 @@
 
 #include "pathTraceCommon.h"
 
+#include "devScene.h"
+
 #include <string>
 #include <memory>
 
@@ -15,6 +17,15 @@ public:
 
 	Scene& operator=(Scene&&) noexcept;
 	Scene(Scene&&) noexcept;
+
+	DevScene getDevScene() {
+		return DevScene{
+			dev_geometry,
+			m_geometryCount,
+			dev_materials,
+			m_materialCount
+		};
+	}
 
 	Geom* dev_geometry = nullptr;
 	size_t m_geometryCount = 0;

@@ -126,8 +126,7 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates,
 
 __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_intersectionData,
     int activePathCount,
-    Geom* dev_geometry,
-    int geometryCount)
+    DevScene dev_scene)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -142,15 +141,7 @@ __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_i
 
     Ray currentRay = dev_pathStates[index].ray;
 
-    IntersectionData closestIntersection = IntersectionData{};
-    for (int i = 0; i < geometryCount; i++) {
-        IntersectionData intersection = IntersectionStatics::intersectGeometry(currentRay, dev_geometry[i]);
-        if (intersection.t > 0.0f) {
-            if (closestIntersection.t < 0.0f || intersection.t < closestIntersection.t) {
-                closestIntersection = intersection;
-            }
-        }
-    }
+    IntersectionData closestIntersection = dev_scene.intersect(currentRay);
 
     dev_intersectionData[index] = closestIntersection;
 }
@@ -158,8 +149,7 @@ __global__ void kernIntersect(PathState* dev_pathStates, IntersectionData* dev_i
 __global__ void kernShade(
     PathState* dev_pathStates,
     IntersectionData* dev_intersectionData,
-    Material* dev_materials,
-    int materialCount,
+    DevScene dev_scene,
     int activePathCount,
     cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
@@ -191,12 +181,12 @@ __global__ void kernShade(
         return;
     }
 
-    if (intersectionData.materialIndex >= materialCount) {
+    if (intersectionData.materialIndex >= dev_scene.m_materialCount) {
         pathState.active = false;
         return;
     }
 
-    Material material = dev_materials[intersectionData.materialIndex];
+    Material material = dev_scene.dev_materials[intersectionData.materialIndex];
 
     // Add emissive
     pathState.accumulatedColor += pathState.throughput * material.color * material.emittance;
@@ -343,19 +333,20 @@ void launchCameraRayGenKernel(PathState* dev_pathStates, int width, int height, 
         frameIndex);
 }
 
-void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, Geom* dev_geometry,
-    int geometryCount, int activePathCount)
+void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, const std::unique_ptr<Scene>& scene, int activePathCount)
 {
     dim3 blockSize(32);
     dim3 gridSize(divup(activePathCount, blockSize.x));
 
-    kernIntersect << <gridSize, blockSize >> > (dev_pathStates, dev_intersectionData, activePathCount, dev_geometry, geometryCount);
+    kernIntersect << <gridSize, blockSize >> > (dev_pathStates, 
+        dev_intersectionData, 
+        activePathCount, 
+        scene != nullptr ? scene->getDevScene() : DevScene{});
 }
 
 void launchShadeKernel(PathState* dev_pathStates,
     IntersectionData* dev_intersectionData,
-    Material* dev_materials,
-    int materialCount,
+    const std::unique_ptr<Scene>& scene,
     int activePathCount,
     cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
@@ -369,8 +360,7 @@ void launchShadeKernel(PathState* dev_pathStates,
 
     kernShade << <gridSize, blockSize >> > (dev_pathStates, 
         dev_intersectionData, 
-        dev_materials, 
-        materialCount, 
+        scene != nullptr ? scene->getDevScene() : DevScene{},
         activePathCount,
         surface,
         dev_accumulatedColor,

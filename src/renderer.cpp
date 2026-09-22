@@ -109,14 +109,12 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera,
 
         launchIntersectKernel(dev_pathStates,
             dev_intersectionData,
-            scene ? scene->dev_geometry : nullptr,
-            scene ? scene->m_geometryCount : 0,
+            scene,
             currentActivePathCount);
 
         launchShadeKernel(dev_pathStates,
             dev_intersectionData,
-            scene ? scene->dev_materials : nullptr,
-            scene ? scene->m_materialCount : 0,
+            scene,
             currentActivePathCount,
             m_cudaSurfaceObject,
             dev_accumulatedColor,
