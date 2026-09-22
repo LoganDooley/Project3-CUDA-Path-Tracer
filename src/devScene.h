@@ -9,4 +9,5 @@ struct DevScene {
 	size_t m_geometryCount = 0;
 	Material* dev_materials = nullptr;
 	size_t m_materialCount = 0;
+	size_t m_lightCount = 0;
 };

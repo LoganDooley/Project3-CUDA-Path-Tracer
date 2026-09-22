@@ -11,6 +11,8 @@
 #include <fstream>
 #include <iostream>
 #include <unordered_map>
+#include <algorithm>
+#include <iterator>
 
 using json = nlohmann::json;
 
@@ -155,6 +157,13 @@ std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath)
     }
 
 	std::unique_ptr<Scene> scene = std::make_unique<Scene>();
+
+    // Sort geometry so lights are in the front
+    auto it = std::partition(geometry.begin(), geometry.end(), [materials](const Geom& geometry) {
+        return geometry.materialid < materials.size() && geometry.materialid >= 0 && materials[geometry.materialid].emittance > 0.0f;
+        });
+
+    scene->m_lightCount = std::distance(geometry.begin(), it);
 
     // Allocate geometry and material space on the GPU
     if (geometry.size() > 0) {

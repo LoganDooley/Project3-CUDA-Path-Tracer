@@ -23,7 +23,8 @@ public:
 			dev_geometry,
 			m_geometryCount,
 			dev_materials,
-			m_materialCount
+			m_materialCount,
+			m_lightCount
 		};
 	}
 
@@ -32,6 +33,9 @@ public:
 
 	Material* dev_materials = nullptr;
 	size_t m_materialCount = 0;
+
+	// First m_lightCount pieces of geometry are lights
+	size_t m_lightCount = 0;
 };
 
 class SceneLoader {
