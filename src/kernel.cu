@@ -188,8 +188,15 @@ __global__ void kernShade(
 
     Material material = dev_scene.dev_materials[intersectionData.materialIndex];
 
-    // Add emissive
-    pathState.accumulatedColor += pathState.throughput * material.color * material.emittance;
+    if (material.emittance > 0.0f) {
+        if (pathState.bounceCount == 0) {
+            pathState.accumulatedColor += pathState.throughput * material.color * material.emittance;
+        }
+
+        pathState.active = false;
+        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
+        return;
+    }
 
     thrust::default_random_engine rng = makeSeededRandomEngine(iteration, index, frameIndex);
     thrust::uniform_real_distribution<float> u01(0, 1);
@@ -209,6 +216,18 @@ __global__ void kernShade(
         // Compensate for survival probability
         pathState.throughput /= survivalProbability;
     }
+    
+    // Next Event Estimation
+    bool bUseReflectRefract = (material.hasReflective > 0.0f || material.hasRefractive > 0.0f);
+    bool bUseSpecular = (material.specular.color.x > 0.0f || material.specular.color.y > 0.0f || material.specular.color.z > 0.0f);
+
+    if (!bUseReflectRefract) {
+        glm::vec4 neeRandom = glm::vec4(u01(rng), u01(rng), u01(rng), u01(rng));
+
+        glm::vec3 directLighting = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData);
+
+        pathState.accumulatedColor += pathState.throughput * directLighting;
+    }
 
     // Generate diffuse ray direction
     glm::vec2 random = glm::vec2(u01(rng), u01(rng));
@@ -217,10 +236,6 @@ __global__ void kernShade(
     glm::vec3 wi = -pathState.ray.direction;
 
     float epsilonSign = 1.0f;
-
-    bool bUseReflectRefract = (material.hasReflective > 0.0f || material.hasRefractive > 0.0f);
-
-    bool bUseSpecular = (material.specular.color.x > 0.0f || material.specular.color.y > 0.0f || material.specular.color.z > 0.0f);
 
     if (bUseReflectRefract) {
         brdfWeight = ShadingMaterial::evaluatePerfectSpecularMaterial(material,
