@@ -28,6 +28,7 @@ struct PathState {
 	int bounceCount = 0;
 	bool active = true;
 	int pixelIndex = -1;
+	float previousPdf = 0.0f;
 };
 
 enum GeomType

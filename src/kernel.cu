@@ -174,8 +174,7 @@ __global__ void kernShade(
     PathState& pathState = dev_pathStates[index];
 
     if (intersectionData.t <= 0.0f) {
-        // Add environment lighting & mark terminated
-        //dev_pathStates[index].accumulatedColor += dev_pathStates[index].throughput * glm::vec3(0.0f, 0.3f, 0.7f);
+        // TODO: Add environment lighting
         pathState.active = false;
         writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
         return;
@@ -188,11 +187,11 @@ __global__ void kernShade(
 
     Material material = dev_scene.dev_materials[intersectionData.materialIndex];
 
-    if (material.emittance > 0.0f) {
-        if (pathState.bounceCount == 0) {
-            pathState.accumulatedColor += pathState.throughput * material.color * material.emittance;
-        }
+    if (material.emittance > 0.0f && pathState.bounceCount == 0) {
+        // Only add emissive from intersection on 0th bounce. Otherwise covered by NEE
+        pathState.accumulatedColor += pathState.throughput * material.color * material.emittance;
 
+        // Hitting a light terminates the path
         pathState.active = false;
         writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
         return;
@@ -222,9 +221,11 @@ __global__ void kernShade(
     bool bUseSpecular = (material.specular.color.x > 0.0f || material.specular.color.y > 0.0f || material.specular.color.z > 0.0f);
 
     if (!bUseReflectRefract) {
+        // Do NEE for non perfectly specular lights
         glm::vec4 neeRandom = glm::vec4(u01(rng), u01(rng), u01(rng), u01(rng));
 
-        glm::vec3 directLighting = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData);
+        float directLightingPdf = 0.0f;
+        glm::vec3 directLighting = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData, directLightingPdf);
 
         pathState.accumulatedColor += pathState.throughput * directLighting;
     }

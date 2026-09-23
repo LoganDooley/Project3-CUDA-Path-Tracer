@@ -25,7 +25,8 @@ __device__ bool DevScene::isVisible(const Ray& ray, float tMax)
 
 __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random, 
     const Ray& incomingRay, 
-    const IntersectionData& intersectionData)
+    const IntersectionData& intersectionData,
+    float& outPdf)
 {
     if (m_lightCount == 0) {
         return glm::vec3(0.0f);
@@ -104,5 +105,6 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
 
     float geometryTerm = cosThetaLight / (distance * distance);
 
-    return (brdfWeight * emission * geometryTerm) / (lightSurfacePdf * lightIndexPdf);
+    outPdf = lightSurfacePdf * lightIndexPdf;
+    return (brdfWeight * emission * geometryTerm) / outPdf;
 }
