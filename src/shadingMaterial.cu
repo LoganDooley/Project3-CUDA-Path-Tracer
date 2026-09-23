@@ -2,39 +2,36 @@
 
 #include "samplers.h"
 
-__device__ glm::vec3 ShadingMaterial::evaluateDiffuseMaterial(const Material& material, const glm::vec3& normal, const glm::vec2& random, glm::vec3& outOutgoingDirection)
+__device__ glm::vec3 ShadingMaterial::evaluateDiffuseMaterial(const Material& material,
+	const glm::vec3& normal,
+	const glm::vec3& outgoingDirection)
 {
-	float pdf = 0.0f;
-	outOutgoingDirection = Samplers::sampleCosineWeightedHemisphere(normal, random, pdf);
-
 	glm::vec3 brdf = material.color / glm::pi<float>();
-	float cosTheta = glm::max(0.0f, glm::dot(normal, outOutgoingDirection));
-	
-	// TODO: Simplify this to just material.color likely
-	return (brdf * cosTheta) / pdf;
+	float cosTheta = glm::max(0.0f, glm::dot(normal, outgoingDirection));
+
+	return brdf * cosTheta;
 }
 
-__device__ glm::vec3 ShadingMaterial::evaluateGlossySpecularMaterial(const Material& material, const glm::vec3& normal, const glm::vec3& wi, const glm::vec2& random, glm::vec3& outOutgoingDirection)
+__device__ glm::vec3 ShadingMaterial::pickDiffuseOutgoingDirection(const glm::vec3& normal, const glm::vec2& random, float& outPdf)
 {
-	float pdf = 0.0f;
-	outOutgoingDirection = Samplers::sampleWorldBlinnPhong(
-		normal,
-		wi,
-		random,
-		material.specular.exponent,
-		pdf
-	);
+	return Samplers::sampleCosineWeightedHemisphere(normal, random, outPdf);
+}
 
-	float cosTheta = glm::max(0.0f, glm::dot(normal, outOutgoingDirection));
+__device__ glm::vec3 ShadingMaterial::evaluateGlossySpecularMaterial(const Material& material,
+	const glm::vec3& normal,
+	const glm::vec3& wi,
+	const glm::vec3& outgoingDirection)
+{
+	float cosTheta = glm::max(0.0f, glm::dot(normal, outgoingDirection));
 
-	if (pdf <= 0.0f || cosTheta <= 0.0f) {
+	if (cosTheta <= 0.0f) {
 		return glm::vec3(0.0f);
 	}
 
 	// Evaluate blinn phong brdf
-	glm::vec3 halfVector = glm::normalize(wi + outOutgoingDirection);
+	glm::vec3 halfVector = glm::normalize(wi + outgoingDirection);
 	float dotNH = glm::max(0.0f, glm::dot(normal, halfVector));
-	float dotLH = glm::max(0.0f, glm::dot(outOutgoingDirection, halfVector));
+	float dotLH = glm::max(0.0f, glm::dot(outgoingDirection, halfVector));
 	float dotNV = glm::max(0.0f, glm::dot(normal, wi));
 
 	if (dotNV <= 0.0f) {
@@ -59,7 +56,19 @@ __device__ glm::vec3 ShadingMaterial::evaluateGlossySpecularMaterial(const Mater
 	// Add energy conserved diffuse
 	glm::vec3 brdfDiffuse = (glm::vec3(1.0f) - F) * (material.color / glm::pi<float>());
 
-	return ((brdfSpecular + brdfDiffuse) * cosTheta) / pdf;
+	return (brdfSpecular + brdfDiffuse) * cosTheta;
+}
+
+__device__ glm::vec3 ShadingMaterial::pickGlossySpecularOutgoingDirection(const Material& material, const glm::vec3& normal, const glm::vec3& wi, const glm::vec2& random, float& outPdf)
+{
+	return Samplers::sampleWorldBlinnPhong(
+		normal,
+		wi,
+		random,
+		material.specular.exponent,
+		outPdf
+	);
+
 }
 
 __device__ glm::vec3 ShadingMaterial::evaluatePerfectSpecularMaterial(const Material& material, const glm::vec3& normal, const glm::vec3& wi, float random, bool bInside, glm::vec3& outOutgoingDirection, float& outEpsilonSign)

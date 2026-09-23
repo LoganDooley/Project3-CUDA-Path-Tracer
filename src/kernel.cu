@@ -247,17 +247,19 @@ __global__ void kernShade(
             epsilonSign);
     }
     else if (bUseSpecular) {
+        float pdf = 0.0f;
+        outgoingDirection = ShadingMaterial::pickGlossySpecularOutgoingDirection(material, intersectionData.normal, wi, random, pdf);
         brdfWeight = ShadingMaterial::evaluateGlossySpecularMaterial(material,
             intersectionData.normal,
             wi,
-            random,
             outgoingDirection);
+        brdfWeight /= pdf;
     }
     else {
-        brdfWeight = ShadingMaterial::evaluateDiffuseMaterial(material,
-            intersectionData.normal,
-            random,
-            outgoingDirection);
+        float pdf = 0.0f;
+        outgoingDirection = ShadingMaterial::pickDiffuseOutgoingDirection(intersectionData.normal, random, pdf);
+        brdfWeight = ShadingMaterial::evaluateDiffuseMaterial(material, intersectionData.normal, outgoingDirection);
+        brdfWeight /= pdf;
     }
 
     // Did brdf return a valid value
