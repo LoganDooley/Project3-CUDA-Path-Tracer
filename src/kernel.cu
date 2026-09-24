@@ -190,7 +190,6 @@ __global__ void kernShade(
     PathState& pathState = dev_pathStates[index];
 
     if (intersectionData.t <= 0.0f) {
-        // TODO: Add environment lighting
         pathState.accumulatedColor += sampleEnvironmentMap(environmentMap, pathState.ray.direction);
         pathState.active = false;
         writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
@@ -213,7 +212,7 @@ __global__ void kernShade(
         return;
     }
 
-    thrust::default_random_engine rng = makeSeededRandomEngine(iteration, index, frameIndex);
+    thrust::default_random_engine rng = makeSeededRandomEngine(frameIndex, index, iteration);
     thrust::uniform_real_distribution<float> u01(0, 1);
 
     // Run russian roulette

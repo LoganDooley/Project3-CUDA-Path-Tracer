@@ -806,9 +806,11 @@ void Application::pickEnvironmentMap()
 	}
 
 	m_currentEnvironmentMap = std::make_unique<EnvironmentMap>(imageData, width, height);
+	m_camera.m_hasMoved = true;
 }
 
 void Application::clearEnvironmentMap()
 {
 	m_currentEnvironmentMap = nullptr;
+	m_camera.m_hasMoved = true;
 }
