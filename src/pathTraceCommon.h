@@ -17,6 +17,17 @@ public:
 		return transformed;
 	}
 
+	// Construct new ray with origin shifted in direction of the normal as needed
+	__host__ __device__ static Ray generateBouncedRay(const glm::vec3& normal, const glm::vec3& newOrigin, const glm::vec3& newDirection) {
+		
+		const float epsilon = copysignf(0.0001f, glm::dot(normal, newDirection));
+		Ray newRay;
+		newRay.origin = newOrigin + epsilon * normal;
+		newRay.direction = newDirection;
+
+		return newRay;
+	}
+
 	glm::vec3 origin = glm::vec3(0.0f);
 	glm::vec3 direction = glm::vec3(1.0f, 0.0f, 0.0f);
 };
@@ -28,7 +39,8 @@ struct PathState {
 	int bounceCount = 0;
 	bool active = true;
 	int pixelIndex = -1;
-	float previousPdf = 0.0f;
+	float previousBrdfPdf = 0.0f;
+	bool previousSpecular = true;
 };
 
 enum GeomType
@@ -50,20 +62,6 @@ struct Geom
 	glm::mat4 transform = glm::mat4(1.0f);
 	glm::mat4 inverseTransform = glm::mat4(1.0f);
 	glm::mat4 invTranspose = glm::mat4(1.0f);
-};
-
-struct Material
-{
-	glm::vec3 color = glm::vec3(1.0, 0.0, 0.203);
-	struct
-	{
-		float exponent = 1.f;
-		glm::vec3 color = glm::vec3(0.0f);
-	} specular;
-	float hasReflective = -1.f;
-	float hasRefractive = -1.f;
-	float indexOfRefraction = 1.f;
-	float emittance = 0.f;
 };
 
 struct IntersectionData {

@@ -9,7 +9,7 @@
 #include <thrust/partition.h>
 
 #include "samplers.h"
-#include "shadingMaterial.h"
+#include "material.h"
 
 #define MIN_RUSSIAN_ROULETTE_BOUNCES 2
 
@@ -187,8 +187,7 @@ __global__ void kernShade(
 
     Material material = dev_scene.dev_materials[intersectionData.materialIndex];
 
-    if (material.emittance > 0.0f && pathState.bounceCount == 0) {
-        // Only add emissive from intersection on 0th bounce. Otherwise covered by NEE
+    if (material.emittance > 0.0f) {
         pathState.accumulatedColor += pathState.throughput * material.color * material.emittance;
 
         // Hitting a light terminates the path
@@ -217,64 +216,48 @@ __global__ void kernShade(
     }
     
     // Next Event Estimation
-    bool bUseReflectRefract = (material.hasReflective > 0.0f || material.hasRefractive > 0.0f);
-    bool bUseSpecular = (material.specular.color.x > 0.0f || material.specular.color.y > 0.0f || material.specular.color.z > 0.0f);
+    //if (!material.isSpecular()) {
+    //    // Do NEE for non perfectly specular lights
+    //    glm::vec4 neeRandom = glm::vec4(u01(rng), u01(rng), u01(rng), u01(rng));
 
-    if (!bUseReflectRefract) {
-        // Do NEE for non perfectly specular lights
-        glm::vec4 neeRandom = glm::vec4(u01(rng), u01(rng), u01(rng), u01(rng));
+    //    float directLightingPdf = 0.0f;
+    //    glm::vec3 directLighting = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData, directLightingPdf);
 
-        float directLightingPdf = 0.0f;
-        glm::vec3 directLighting = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData, directLightingPdf);
-
-        pathState.accumulatedColor += pathState.throughput * directLighting;
-    }
+    //    pathState.accumulatedColor += pathState.throughput * directLighting;
+    //}
 
     // Generate diffuse ray direction
-    glm::vec2 random = glm::vec2(u01(rng), u01(rng));
-    glm::vec3 outgoingDirection = glm::vec3(0.0f);
     glm::vec3 brdfWeight = glm::vec3(0.0f);
     glm::vec3 wi = -pathState.ray.direction;
+    glm::vec3 wo = glm::vec3(0.0f);
 
     float epsilonSign = 1.0f;
 
-    if (bUseReflectRefract) {
-        brdfWeight = ShadingMaterial::evaluatePerfectSpecularMaterial(material,
-            intersectionData.normal,
-            wi,
-            random.x,
-            intersectionData.bInside,
-            outgoingDirection,
-            epsilonSign);
-    }
-    else if (bUseSpecular) {
-        float pdf = 0.0f;
-        outgoingDirection = ShadingMaterial::pickGlossySpecularOutgoingDirection(material, intersectionData.normal, wi, random, pdf);
-        brdfWeight = ShadingMaterial::evaluateGlossySpecularMaterial(material,
-            intersectionData.normal,
-            wi,
-            outgoingDirection);
-        brdfWeight /= pdf;
-    }
-    else {
-        float pdf = 0.0f;
-        outgoingDirection = ShadingMaterial::pickDiffuseOutgoingDirection(intersectionData.normal, random, pdf);
-        brdfWeight = ShadingMaterial::evaluateDiffuseMaterial(material, intersectionData.normal, outgoingDirection);
-        brdfWeight /= pdf;
+    float brdfPdf = 0.0f;
+    wo = material.pickOugoingDirection(intersectionData.normal, wi, glm::vec2(u01(rng), u01(rng)), intersectionData.bInside, brdfPdf);
+    brdfWeight = material.evaluateBrdf(intersectionData.normal, wi, wo, true);
+
+    if (!material.isSpecular()) {
+        if (brdfPdf > 0.0f) {
+            brdfWeight /= brdfPdf;
+        }
+        else {
+            brdfWeight = glm::vec3(0.0f);
+        }
     }
 
     // Did brdf return a valid value
     if (brdfWeight.x <= 0.0f && brdfWeight.y <= 0.0f && brdfWeight.z <= 0.0f) {
         pathState.active = false;
+        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
         return;
     }
 
     pathState.throughput *= brdfWeight;
 
     // Update ray for next iteration
-    const float EPSILON = 0.001f;
-    pathState.ray.origin = pathState.ray.getPositionAtTime(intersectionData.t) + intersectionData.normal * epsilonSign * EPSILON;
-    pathState.ray.direction = outgoingDirection;
+    glm::vec3 intersectionPosition = pathState.ray.getPositionAtTime(intersectionData.t);
+    pathState.ray = Ray::generateBouncedRay(intersectionData.normal, intersectionPosition, wo);
 
     // Increment bounce count
     pathState.bounceCount += 1;

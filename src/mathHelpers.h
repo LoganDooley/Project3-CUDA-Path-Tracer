@@ -44,4 +44,8 @@ public:
 		// Construct the Bitangent
 		outBitangent = glm::vec3(b, sign + inNormal.y * inNormal.y * a, -inNormal.y);
 	}
+
+	__host__ __device__ static float powerHeuristic(float pdfA, float pdfB) {
+		return (pdfA * pdfA) / (pdfA * pdfA + pdfB * pdfB);
+	}
 };

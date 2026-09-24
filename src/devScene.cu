@@ -1,6 +1,6 @@
 #include "devScene.h"
 
-#include "shadingMaterial.h"
+#include "material.h"
 #include "samplers.h"
 
 __device__ IntersectionData DevScene::intersect(const Ray& ray) {
@@ -90,18 +90,7 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
     glm::vec3 wi = -incomingRay.direction;
     glm::vec3 wo = visibilityRay.direction;
 
-    bool bUseReflectRefract = (surfaceMaterial.hasReflective > 0.0f || surfaceMaterial.hasRefractive > 0.0f);
-    bool bUseSpecular = (surfaceMaterial.specular.color.x > 0.0f || surfaceMaterial.specular.color.y > 0.0f || surfaceMaterial.specular.color.z > 0.0f);
-
-    if (bUseReflectRefract) {
-        return glm::vec3(0.0f);
-    }
-    else if (bUseSpecular) {
-        brdfWeight = ShadingMaterial::evaluateGlossySpecularMaterial(surfaceMaterial, intersectionData.normal, wi, wo);
-    }
-    else {
-        brdfWeight = ShadingMaterial::evaluateDiffuseMaterial(surfaceMaterial, intersectionData.normal, wo);
-    }
+    brdfWeight = surfaceMaterial.evaluateBrdf(intersectionData.normal, wi, wo, false);
 
     float geometryTerm = cosThetaLight / (distance * distance);
 

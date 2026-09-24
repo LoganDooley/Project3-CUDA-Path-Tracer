@@ -2,6 +2,8 @@
 
 #include "pathTraceCommon.h"
 
+#include "material.h"
+
 struct DevScene {
 	__device__ IntersectionData intersect(const Ray& ray);
 
