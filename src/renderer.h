@@ -7,6 +7,7 @@
 #include "pathTraceCommon.h"
 #include "scene.h"
 #include "camera.h"
+#include "environmentMap.h"
 
 #include <memory>
 
@@ -21,7 +22,7 @@ public:
 	void resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
 		vk::Extent2D extent, size_t allocationSize);
 
-	void render(const std::unique_ptr<Scene>& scene, const Camera& camera, bool bClearAccumulatedSamples);
+	void render(const std::unique_ptr<Scene>& scene, const std::unique_ptr<EnvironmentMap>& environmentMap, const Camera& camera, bool bClearAccumulatedSamples);
 
 	void saveCurrentRenderToFile(const std::string& filepath);
 

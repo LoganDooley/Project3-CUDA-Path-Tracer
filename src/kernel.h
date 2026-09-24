@@ -6,6 +6,7 @@
 #include "pathTraceCommon.h"
 #include "camera.h"
 #include "scene.h"
+#include "environmentMap.h"
 
 #include <memory>
 
@@ -30,6 +31,7 @@ __global__ void kernShade(
 	PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData,
 	DevScene dev_scene,
+	cudaTextureObject_t environmentMap,
 	int activePathCount,
 	cudaSurfaceObject_t surface,
 	glm::vec3* dev_accumulatedColor,
@@ -64,6 +66,7 @@ void launchIntersectKernel(PathState* dev_pathStates,
 void launchShadeKernel(PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData,
 	const std::unique_ptr<Scene>& scene,
+	const std::unique_ptr<EnvironmentMap>& environmentMap,
 	int activePathCount,
 	cudaSurfaceObject_t surface,
 	glm::vec3* dev_accumulatedColor,

@@ -79,7 +79,7 @@ void Renderer::resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
     cudaMemset(dev_accumulatedColor, 0, getPixelCount() * sizeof(glm::vec3));
 }
 
-void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera, bool bClearAccumulatedSamples)
+void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr<EnvironmentMap>& environmentMap, const Camera& camera, bool bClearAccumulatedSamples)
 {
     if (m_cudaSurfaceObject == 0) {
         return;
@@ -115,6 +115,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const Camera& camera,
         launchShadeKernel(dev_pathStates,
             dev_intersectionData,
             scene,
+            environmentMap,
             currentActivePathCount,
             m_cudaSurfaceObject,
             dev_accumulatedColor,

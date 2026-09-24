@@ -6,6 +6,8 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
 
+#include "stb_image.h"
+
 #include "nfd.hpp"
 
 #include <cuda_runtime.h>
@@ -165,7 +167,7 @@ void Application::run() {
 		m_camera.tick(deltaTime, m_inputState);
 
 		// Render scene
-		m_renderer.render(m_currentScene, m_camera, m_camera.m_hasMoved);
+		m_renderer.render(m_currentScene, m_currentEnvironmentMap, m_camera, m_camera.m_hasMoved);
 
 		// Clear camera has moved
 		m_camera.m_hasMoved = false;
@@ -707,6 +709,12 @@ void Application::renderImGui()
 	if(ImGui::Button("Load Scene File")) {
 		pickSceneFile();
 	}
+	if (ImGui::Button("Load Environment Map")) {
+		pickEnvironmentMap();
+	}
+	if (ImGui::Button("Clear Environment Map")) {
+		clearEnvironmentMap();
+	}
 	if (ImGui::Button("Save Render to File")) {
 		saveCurrentRender();
 	}
@@ -770,4 +778,37 @@ void Application::saveCurrentRender()
 
 	m_renderer.saveCurrentRenderToFile(saveFilePath);
 
+}
+
+void Application::pickEnvironmentMap()
+{
+	NFD::Guard nfdGuard;
+	nfdfilteritem_t filterItem[1] = {
+		{ "Environment Maps",
+		"hdr" }
+	};
+	NFD::UniquePath outPath;
+
+	nfdresult_t result = NFD::OpenDialog(outPath, filterItem, 1, "");
+
+	if (result != NFD_OKAY) {
+		return;
+	}
+
+	std::string environmentMapPath = outPath.get();
+
+	int width, height, channels;
+	// Force 4 channels for cuda
+	float* imageData = stbi_loadf(environmentMapPath.c_str(), &width, &height, &channels, 4);
+
+	if (!imageData) {
+		return;
+	}
+
+	m_currentEnvironmentMap = std::make_unique<EnvironmentMap>(imageData, width, height);
+}
+
+void Application::clearEnvironmentMap()
+{
+	m_currentEnvironmentMap = nullptr;
 }

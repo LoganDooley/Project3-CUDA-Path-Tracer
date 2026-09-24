@@ -73,6 +73,21 @@ __device__ void writePathStateToSurface(const PathState& pathState,
     surf2Dwrite(pixelColor, surface, pixelIndexX * sizeof(uchar4), pixelIndexY);
 }
 
+__device__ glm::vec3 sampleEnvironmentMap(cudaTextureObject_t environmentMap, const glm::vec3& direction) {
+    if (environmentMap == 0) {
+        return glm::vec3(0.0f);
+    }
+
+    float theta = glm::acos(direction.y);
+    float phi = atan2f(direction.z, direction.x);
+
+    float u = 1.0f - (phi + glm::pi<float>()) / (2.0f * glm::pi<float>());
+    float v = theta / glm::pi<float>();
+
+    float4 sampled = tex2D<float4>(environmentMap, u, v);
+    return glm::vec3(sampled.x, sampled.y, sampled.z);
+}
+
 __global__ void kernGenerateCameraRays(PathState* dev_pathStates, 
     int width, 
     int height, 
@@ -150,6 +165,7 @@ __global__ void kernShade(
     PathState* dev_pathStates,
     IntersectionData* dev_intersectionData,
     DevScene dev_scene,
+    cudaTextureObject_t environmentMap,
     int activePathCount,
     cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
@@ -175,6 +191,7 @@ __global__ void kernShade(
 
     if (intersectionData.t <= 0.0f) {
         // TODO: Add environment lighting
+        pathState.accumulatedColor += sampleEnvironmentMap(environmentMap, pathState.ray.direction);
         pathState.active = false;
         writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
         return;
@@ -348,6 +365,7 @@ void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_inte
 void launchShadeKernel(PathState* dev_pathStates,
     IntersectionData* dev_intersectionData,
     const std::unique_ptr<Scene>& scene,
+    const std::unique_ptr<EnvironmentMap>& environmentMap,
     int activePathCount,
     cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
@@ -359,9 +377,10 @@ void launchShadeKernel(PathState* dev_pathStates,
     dim3 blockSize(32);
     dim3 gridSize(divup(activePathCount, blockSize.x));
 
-    kernShade << <gridSize, blockSize >> > (dev_pathStates, 
-        dev_intersectionData, 
+    kernShade << <gridSize, blockSize >> > (dev_pathStates,
+        dev_intersectionData,
         scene != nullptr ? scene->getDevScene() : DevScene{},
+        environmentMap != nullptr ? environmentMap->m_environmentMapTexture : 0,
         activePathCount,
         surface,
         dev_accumulatedColor,

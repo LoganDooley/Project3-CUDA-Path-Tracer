@@ -5,6 +5,7 @@
 #include "scene.h"
 #include "camera.h"
 #include "inputState.h"
+#include "environmentMap.h"
 
 #include <vulkan/vulkan_raii.hpp>
 #include <cuda.h>
@@ -40,6 +41,10 @@ private:
 
 	void saveCurrentRender();
 
+	void pickEnvironmentMap();
+
+	void clearEnvironmentMap();
+
 	vk::raii::Context m_vkContext;
 	Window m_window;
 	Renderer m_renderer;
@@ -47,6 +52,8 @@ private:
 	InputState m_inputState;
 
 	std::unique_ptr<Scene> m_currentScene = nullptr;
+
+	std::unique_ptr<EnvironmentMap> m_currentEnvironmentMap = nullptr;
 
 	vk::raii::Instance m_vkInstance = nullptr;
 	vk::raii::SurfaceKHR m_vkSurface = nullptr;
