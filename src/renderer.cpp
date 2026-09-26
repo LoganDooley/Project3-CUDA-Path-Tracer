@@ -149,8 +149,13 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
 
     m_svgfManager->executeTemporalAccumulation();
 
+    m_svgfManager->executeVarianceEstimation();
+
+    m_svgfManager->executeAtrousFilteringPipeline();
+
     //m_svgfManager->debugMotionVectors(m_cudaSurfaceObject);
     m_svgfManager->debugIlluminance(m_cudaSurfaceObject);
+    //m_svgfManager->debugVariance(m_cudaSurfaceObject);
 
     m_svgfManager->swapBuffers();
 

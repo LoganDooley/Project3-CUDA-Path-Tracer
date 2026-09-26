@@ -44,7 +44,9 @@ __device__ glm::vec2 calculateMotionVector(
 
 __device__ float computeLuminance(const glm::vec3& color)
 {
-	return 0.2126f * color.x + 0.7152f * color.y + 0.0722f * color.z;
+	glm::vec3 luminanceWeights = glm::vec3(0.2126f, 0.7152f, 0.0722f);
+	float luminance = glm::dot(color, luminanceWeights);
+	return luminance;
 }
 
 __global__ void kernCaptureGBuffer(
@@ -128,6 +130,7 @@ __global__ void kernTemporalAccumulation(
 	glm::vec4 currentColor = dev_pingBuffer[pixelIndex];
 
 	float currentLuminance = computeLuminance(currentColor);
+	currentLuminance = glm::clamp(currentLuminance, 0.0f, 30.f);
 
 	// Get prev x and y from motion vector
 	glm::vec2 motionVector = dev_gBuffer_motionVectors[pixelIndex];
@@ -157,9 +160,9 @@ __global__ void kernTemporalAccumulation(
 			bValidHistory = true;
 			unsigned int historicalCount = dev_historyLengthPrev[prevPixelIndex];
 
-			updatedHistoryCount = glm::min(historicalCount + 1, 128U);
+			updatedHistoryCount = glm::min(historicalCount + 1, 32U);
 
-			alpha = glm::max(1.0f / (float)updatedHistoryCount, 0.01f);
+			alpha = glm::max(1.0f / (float)updatedHistoryCount, 0.05f);
 		}
 	}
 
@@ -177,6 +180,337 @@ __global__ void kernTemporalAccumulation(
 		dev_integratedColor[pixelIndex] = currentColor;
 
 		dev_moments[pixelIndex] = currentMoments;
+	}
+}
+
+__device__ float calculateVariance(const glm::vec2& moments) {
+	return glm::max(0.0f, moments.x - moments.y * moments.y);
+}
+
+__global__ void kernEstimateVariance(
+	const glm::vec4* dev_pingBuffer,
+	const glm::vec2* dev_moments,
+	const glm::vec4* dev_gBuffer_normalDepth,
+	const unsigned int* dev_historyLength,
+	float* dev_variance,
+	int width, int height
+)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x >= width || y >= height) {
+		return;
+	}
+
+	int pixelIndex = y * width + x;
+	unsigned int history = dev_historyLength[pixelIndex];
+
+	// Need some significant history to calculate variance
+	if (history >= 4) {
+		glm::vec2 m = dev_moments[pixelIndex];
+
+		dev_variance[pixelIndex] = calculateVariance(m);
+		return;
+	}
+	dev_variance[pixelIndex] = 0.0f;
+	return;
+
+	// If short history, use spatial varaince
+	glm::vec4 centerND = dev_gBuffer_normalDepth[pixelIndex];
+	float centerDepth = centerND.w;
+
+	if (centerDepth < 0.0f) {
+		dev_variance[pixelIndex] = 0.0f;
+		return;
+	}
+
+	glm::vec3 centerNormal = glm::vec3(centerND);
+
+	glm::vec2 sumMoments = glm::vec2(0.0f);
+	float sumWeight = 0.0f;
+
+	// 7x7 bilateral filter
+	for (int dy = -3; dy <= 3; dy++) {
+		for (int dx = -3; dx <= 3; dx++) {
+			int nx = x + dx;
+			int ny = y + dy;
+
+			if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+				continue;
+			}
+
+			int neighborIdx = ny * width + nx;
+			glm::vec4 neighborND = dev_gBuffer_normalDepth[neighborIdx];
+			float neighborDepth = neighborND.w;
+
+			if (neighborDepth < 0.0f) {
+				continue;
+			}
+
+			glm::vec3 neighborNormal = glm::vec3(neighborND);
+
+			// Bilateral weights
+			float wNormal = glm::pow(glm::max(0.0f, glm::dot(centerNormal, neighborNormal)), 128.0f);
+			float wDepth = glm::exp(-glm::abs(centerDepth - neighborDepth) / (centerDepth * 0.1f + 1e-4f));
+			
+			unsigned int neighborHistory = dev_historyLength[neighborIdx];
+			float wHistory = glm::max(1.0f, (float)neighborHistory);
+
+			float wBilateral = wNormal * wDepth * wHistory;
+
+			glm::vec2 nMoments = dev_moments[neighborIdx];
+			sumMoments += wBilateral * nMoments;
+			sumWeight += wBilateral;
+		}
+	}
+
+	if (sumWeight > 0.0f) {
+		sumMoments /= sumWeight;
+	}
+
+	dev_variance[pixelIndex] = calculateVariance(sumMoments);
+}
+
+__global__ void kernVariancePrefilter3x3(
+	const float* dev_variance,
+	const glm::vec4* dev_gBuffer_normalDepth,
+	float* dev_prefilteredVariance,
+	int width, int height
+) {
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x >= width || y >= height) return;
+
+	int pixelIndex = y * width + x;
+
+	float centerDepth = dev_gBuffer_normalDepth[pixelIndex].w;
+	if (centerDepth < 0.0f) {
+		// Skip computing variance
+		dev_prefilteredVariance[pixelIndex] = 0.0f;
+		return;
+	}
+
+	// 3x3 Gaussian kernel
+	const float wGaus[3][3] = {
+		{ 1.0f / 16.0f, 2.0f / 16.0f, 1.0f / 16.0f },
+		{ 2.0f / 16.0f, 4.0f / 16.0f, 2.0f / 16.0f },
+		{ 1.0f / 16.0f, 2.0f / 16.0f, 1.0f / 16.0f }
+	};
+
+	float sumVariance = 0.0f;
+	float sumWeight = 0.0f;
+
+	// Blur over 3x3 neighborhood
+	for (int r = -1; r <= 1; ++r) {
+		for (int c = -1; c <= 1; ++c) {
+			int nx = glm::clamp(x + c, 0, width - 1);
+			int ny = glm::clamp(y + r, 0, height - 1);
+			int neighborIndex = ny * width + nx;
+
+			float neighborDepth = dev_gBuffer_normalDepth[neighborIndex].w;
+			if (neighborDepth < 0.0f) {
+				// Neighbor missed geometry, skip
+				continue;
+			}
+
+			float w = wGaus[r + 1][c + 1];
+			sumVariance += dev_variance[neighborIndex] * w;
+			sumWeight += w;
+		}
+	}
+
+	if (sumWeight > 0.0f) {
+		dev_prefilteredVariance[pixelIndex] = sumVariance / sumWeight;
+	}
+	else {
+		// Copy non blurred variance for rays missing geometry
+		dev_prefilteredVariance[pixelIndex] = dev_variance[pixelIndex];
+	}
+}
+
+__device__ glm::vec2 computeDepthGradient(
+	glm::ivec2 p,
+	const glm::vec4* dev_gBuffer_normalDepth,
+	float depthP,
+	int width,
+	int height
+) {
+	int rightX = glm::min(p.x + 1, width - 1);
+	int leftX = glm::max(p.x - 1, 0);
+	int bottomY = glm::min(p.y + 1, height - 1);
+	int topY = glm::max(p.y - 1, 0);
+
+	float depthRight = dev_gBuffer_normalDepth[p.y * width + rightX].w;
+	float depthLeft = dev_gBuffer_normalDepth[p.y * width + leftX].w;
+	float depthBottom = dev_gBuffer_normalDepth[bottomY * width + p.x].w;
+	float depthTop = dev_gBuffer_normalDepth[topY * width + p.x].w;
+
+	float dDepthdX = 0.0f;
+	if (depthRight >= 0.0f) {
+		dDepthdX = depthRight - depthP;
+	}
+	else if (depthLeft >= 0.0f) {
+		dDepthdX = depthP - depthLeft;
+	}
+
+	float dDepthdY = 0.0f;
+	if (depthBottom >= 0.0f) {
+		dDepthdY = depthBottom - depthP;
+	}
+	else if (depthTop >= 0.0f) {
+		dDepthdY = depthP - depthTop;
+	}
+
+	return glm::vec2(dDepthdX, dDepthdY);
+}
+
+__device__ float computeTotalWeight(
+	// Pixel values
+	glm::ivec2 p,
+	glm::ivec2 q,
+	// Depth values
+	float depthP,
+	float depthQ,
+	float sigmaDepth,
+	glm::vec2 depthGradP,
+	// Normal values
+	glm::vec3 normalP,
+	glm::vec3 normalQ,
+	float sigmaNormal,
+	// Luminance values
+	float luminanceP,
+	float luminanceQ,
+	float luminancePrefilteredVariance,
+	float sigmaLuminance
+)
+{
+	const float epsilon = 0.0001f;
+	// Calculate w_z
+	float depthDelta = glm::abs(depthP - depthQ);
+	float w_z = glm::exp(-depthDelta / (sigmaDepth * glm::abs(glm::dot(depthGradP, glm::vec2(p - q))) + epsilon));
+
+	// Calculate w_n
+	float normalDot = glm::dot(normalP, normalQ);
+	float w_n = glm::pow(glm::max(0.0f, normalDot), sigmaNormal);
+
+	// Calculate w_l
+	float luminanceDelta = glm::abs(luminanceP - luminanceQ);
+	float w_l = glm::exp(-luminanceDelta / (sigmaLuminance * glm::sqrt(luminancePrefilteredVariance) + epsilon));
+
+	float w_i = w_z * w_n * w_l;
+
+	return w_i;
+}
+
+__global__ void kernAtrousFilter(
+	const glm::vec4* dev_inputColor,
+	const glm::vec4* dev_gBuffer_normalDepth,
+	const float* dev_inputVariance,
+	const float* dev_prefilteredVariance,
+	float* dev_outputVariance,
+	glm::vec4* dev_outputColor,
+	int stride,
+	float sigmaLuminance,
+	float sigmaNormal,
+	float sigmaDepth,
+	int width, int height)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x >= width || y >= height) return;
+
+	int pixelIndex = y * width + x;
+	glm::ivec2 p = glm::ivec2(x, y);
+
+	glm::vec4 centerND = dev_gBuffer_normalDepth[pixelIndex];
+	float depthP = centerND.w;
+
+	if (depthP < 0.0f) {
+		// Ray missed, just copy without filtering
+		dev_outputColor[pixelIndex] = dev_inputColor[pixelIndex];
+		return;
+	}
+
+	glm::vec2 depthGradP = computeDepthGradient(p, dev_gBuffer_normalDepth, depthP, width, height);
+	glm::vec3 normalP = glm::vec3(centerND);
+	glm::vec4 colorP = dev_inputColor[pixelIndex];
+	float luminanceP = computeLuminance(glm::vec3(colorP));
+	float varianceP = dev_inputVariance[pixelIndex];
+	float prefilteredVarianceP = dev_prefilteredVariance[pixelIndex];
+
+	// h filter kernel 
+	const float h[5] = { 1.0f/16.0f, 1.0f/4.0f, 3.0f/8.0f, 1.0f/4.0f, 1.0f/16.0f };
+
+	glm::vec3 sumColor = glm::vec3(0.0f);
+	float sumColorWeight = 0.0f;
+
+	float sumVariance = 0.0f;
+	float sumVarianceWeight = 0.0f;
+
+	// Filter over 5x5 window
+	for (int r = -2; r <= 2; ++r) {
+		for (int c = -2; c <= 2; ++c) {
+			if (r == 0 && c == 0) {
+				float wKernel = h[2] * h[2];
+				sumColor += glm::vec3(colorP) * wKernel;
+				sumColorWeight += wKernel;
+				sumVariance += wKernel * wKernel * varianceP;
+				sumVarianceWeight += wKernel;
+				continue;
+			}
+
+			// Calculate neighbor index
+			int nx = glm::clamp(x + c * stride, 0, width - 1);
+			int ny = glm::clamp(y + r * stride, 0, height - 1);
+			glm::ivec2 q = glm::ivec2(nx, ny);
+			int neighborIndex = ny * width + nx;
+
+
+
+			glm::vec4 neighborND = dev_gBuffer_normalDepth[neighborIndex];
+			float depthQ = neighborND.w;
+
+			if (depthQ < 0.0f) {
+				// Neighbor hit environment map, discard
+				continue;
+			}
+
+			glm::vec3 normalQ = glm::vec3(neighborND);
+			glm::vec4 colorQ = dev_inputColor[neighborIndex];
+			float luminanceQ = computeLuminance(glm::vec3(colorQ));
+
+			float h_q = h[r + 2] * h[c + 2];
+
+			float w_pq = computeTotalWeight(
+				p, q,
+				depthP, depthQ, sigmaDepth, depthGradP,
+				normalP, normalQ, sigmaNormal,
+				luminanceP, luminanceQ, prefilteredVarianceP, sigmaLuminance
+			);
+
+			sumColor += h_q * w_pq * glm::vec3(colorQ);
+			sumColorWeight += h_q * w_pq;
+
+			sumVariance += h_q * h_q * w_pq * w_pq * varianceP;
+			sumVarianceWeight += h_q * w_pq;
+		}
+	}
+
+	if (sumColorWeight > 0.0f) {
+		dev_outputColor[pixelIndex] = glm::vec4(sumColor / sumColorWeight, colorP.w);
+	}
+	else {
+		dev_outputColor[pixelIndex] = colorP;
+	}
+
+	if (sumVarianceWeight > 0.0f) {
+		dev_outputVariance[pixelIndex] = sumVariance / (sumVarianceWeight * sumVarianceWeight);
+	}
+	else {
+		dev_outputVariance[pixelIndex] = varianceP;
 	}
 }
 
@@ -256,6 +590,31 @@ __global__ void kernDebugSVGFIllumination(
 	surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
 }
 
+__global__ void kernDebugVariance(
+	const float* dev_variance,
+	cudaSurfaceObject_t surface,
+	int width, int height)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x >= width || y >= height) return;
+
+	int pixelIndex = y * width + x;
+	float variance = dev_variance[pixelIndex];
+
+	// Amplify variance visually since raw statistical variance values are tiny decimal numbers
+	float visualIntensity = glm::clamp(variance * 10.0f, 0.0f, 1.0f);
+
+	uchar4 pixelColor;
+	pixelColor.x = (unsigned char)(visualIntensity * 255.0f); // Blue
+	pixelColor.y = 0;                                         // Green
+	pixelColor.z = (unsigned char)(visualIntensity * 255.0f); // Red (Creates Magenta for noise)
+	pixelColor.w = 255;
+
+	surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
+}
+
 SVGFManager::SVGFManager()
 {
 }
@@ -289,7 +648,9 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 		dev_pongBuffer = other.dev_pongBuffer;
 		dev_moments = other.dev_moments;
 		dev_momentsPrev = other.dev_momentsPrev;
-		dev_variance = other.dev_variance;
+		dev_variancePing = other.dev_variancePing;
+		dev_variancePong = other.dev_variancePong;
+		dev_prefilteredVariance = other.dev_prefilteredVariance;
 
 		other.m_width = 0;
 		other.m_height = 0;
@@ -303,7 +664,9 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 		other.dev_pongBuffer = nullptr;
 		other.dev_moments = nullptr;
 		other.dev_momentsPrev = nullptr;
-		other.dev_variance = nullptr;
+		other.dev_variancePing = nullptr;
+		other.dev_variancePong = nullptr;
+		other.dev_prefilteredVariance = nullptr;
 	}
 
 	return *this;
@@ -399,6 +762,71 @@ void SVGFManager::executeTemporalAccumulation()
 	std::swap(dev_pingBuffer, dev_pongBuffer);
 }
 
+void SVGFManager::executeVarianceEstimation()
+{
+	if (m_width <= 0 || m_height <= 0) {
+		return;
+	}
+
+	dim3 blockSize(16, 16);
+	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+
+	kernEstimateVariance << <gridSize, blockSize >> > (
+		dev_pingBuffer,
+		dev_moments,
+		dev_gBuffer_normalDepth,
+		dev_gBuffer_historyLength,
+		dev_variancePing,
+		m_width,
+		m_height
+		);
+}
+
+void SVGFManager::executeAtrousFilteringPipeline() {
+	if (m_width <= 0 || m_height <= 0) return;
+
+	dim3 blockSize(16, 16);
+	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+
+	// SVGF Tuning coefficients
+	float sigmaLuminance = 4.0f;
+	float sigmaNormal = 128.0f;
+	float sigmaDepth = 1.0f;
+
+	const int iterations = 5;
+
+	for (int i = 0; i < iterations; ++i) {
+		int stride = 1 << i;
+
+		// Prefilter variance
+		kernVariancePrefilter3x3 << <gridSize, blockSize >> > (
+			dev_variancePing,
+			dev_gBuffer_normalDepth,
+			dev_prefilteredVariance,
+			m_width, m_height
+			);
+
+		kernAtrousFilter << <gridSize, blockSize >> > (
+			dev_pingBuffer,
+			dev_gBuffer_normalDepth,
+			dev_variancePing,
+			dev_prefilteredVariance,
+			dev_variancePong,
+			dev_pongBuffer,
+			stride,
+			sigmaLuminance,
+			sigmaNormal,
+			sigmaDepth,
+			m_width,
+			m_height
+			);
+
+		// Ping pong
+		std::swap(dev_pingBuffer, dev_pongBuffer);
+		std::swap(dev_variancePing, dev_variancePong);
+	}
+}
+
 void SVGFManager::debugNormals(cudaSurfaceObject_t surface)
 {
 	dim3 blockSize(16, 16);
@@ -423,6 +851,13 @@ void SVGFManager::debugIlluminance(cudaSurfaceObject_t surface)
 	kernDebugSVGFIllumination << <gridSize, blockSize >> > (dev_pingBuffer, surface, m_width, m_height);
 }
 
+void SVGFManager::debugVariance(cudaSurfaceObject_t surface)
+{
+	dim3 blockSize(16, 16);
+	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+	kernDebugVariance << <gridSize, blockSize >> > (dev_variancePing, surface, m_width, m_height);
+}
+
 void SVGFManager::allocateBuffers()
 {
 	size_t numPixels = static_cast<size_t>(m_width) * m_height;
@@ -439,7 +874,9 @@ void SVGFManager::allocateBuffers()
 
 	CUDA_CHECK(cudaMalloc(&dev_moments, numPixels * sizeof(glm::vec2)));
 	CUDA_CHECK(cudaMalloc(&dev_momentsPrev, numPixels * sizeof(glm::vec2)));
-	CUDA_CHECK(cudaMalloc(&dev_variance, numPixels * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&dev_variancePing, numPixels * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&dev_variancePong, numPixels * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&dev_prefilteredVariance, numPixels * sizeof(float)));
 
 	// Initialize history tracker sizes to 0
 	CUDA_CHECK(cudaMemset(dev_gBuffer_historyLength, 0, numPixels * sizeof(unsigned int)));
@@ -487,8 +924,16 @@ void SVGFManager::freeBuffers()
 		cudaFree(dev_momentsPrev);
 	}
 
-	if (dev_variance) {
-		cudaFree(dev_variance);
+	if (dev_variancePing) {
+		cudaFree(dev_variancePing);
+	}
+
+	if (dev_variancePong) {
+		cudaFree(dev_variancePong);
+	}
+
+	if (dev_prefilteredVariance) {
+		cudaFree(dev_prefilteredVariance);
 	}
 
 	dev_gBuffer_normalDepth = nullptr; 
@@ -501,5 +946,7 @@ void SVGFManager::freeBuffers()
 	dev_pongBuffer = nullptr;
 	dev_moments = nullptr; 
 	dev_momentsPrev = nullptr;
-	dev_variance = nullptr;
+	dev_variancePing = nullptr;
+	dev_variancePong = nullptr;
+	dev_prefilteredVariance = nullptr;
 }

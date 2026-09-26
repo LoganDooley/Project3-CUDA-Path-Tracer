@@ -56,11 +56,17 @@ public:
 
 	void executeTemporalAccumulation();
 
+	void executeVarianceEstimation();
+
+	void executeAtrousFilteringPipeline();
+
 	void debugNormals(cudaSurfaceObject_t surface);
 
 	void debugMotionVectors(cudaSurfaceObject_t surface);
 
 	void debugIlluminance(cudaSurfaceObject_t surface);
+
+	void debugVariance(cudaSurfaceObject_t surface);
 
 	// Current G Buffers
 	glm::vec4* dev_gBuffer_normalDepth = nullptr;
@@ -79,7 +85,9 @@ public:
 	// Variance & Luminance moments
 	glm::vec2* dev_moments = nullptr;
 	glm::vec2* dev_momentsPrev = nullptr;
-	float* dev_variance = nullptr;
+	float* dev_variancePing = nullptr;
+	float* dev_variancePong = nullptr;
+	float* dev_prefilteredVariance = nullptr;
 
 private:
 	void allocateBuffers();
