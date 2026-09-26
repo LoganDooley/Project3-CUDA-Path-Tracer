@@ -19,6 +19,19 @@ __global__ void kernCaptureGBuffer(
 	int height,
 	int currentActivePathCount);
 
+__global__ void kernTemporalAccumulation(
+	const glm::vec4* dev_gBuffer_normalDepth,
+	const glm::vec2* dev_gBuffer_motionVectors,
+	const glm::vec4* dev_gBuffer_normalDepthPrev,
+	const glm::vec4* dev_pingBuffer,
+	const glm::vec4* dev_illuminationPrev,
+	const glm::vec2* dev_momentsPrev,
+	glm::vec4* dev_integratedColor,
+	glm::vec2* dev_moments,
+	unsigned int* dev_historyLength,
+	const unsigned int* dev_historyLengthPrev,
+	int width, int height);
+
 class SVGFManager {
 public:
 	SVGFManager();
@@ -41,9 +54,13 @@ public:
 		int activePathCount,
 		const Camera& camera);
 
+	void executeTemporalAccumulation();
+
 	void debugNormals(cudaSurfaceObject_t surface);
 
 	void debugMotionVectors(cudaSurfaceObject_t surface);
+
+	void debugIlluminance(cudaSurfaceObject_t surface);
 
 	// Current G Buffers
 	glm::vec4* dev_gBuffer_normalDepth = nullptr;
@@ -52,6 +69,7 @@ public:
 
 	// Previous G Buffers
 	glm::vec4* dev_gBuffer_normalDepthPrev = nullptr;
+	unsigned int* dev_gBuffer_historyLengthPrev = nullptr;
 
 	// Illumination buffers
 	glm::vec4* dev_illuminationPrev = nullptr;

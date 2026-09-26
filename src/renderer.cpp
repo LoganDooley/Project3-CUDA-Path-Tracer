@@ -127,6 +127,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             currentActivePathCount,
             m_cudaSurfaceObject,
             dev_accumulatedColor,
+            m_svgfManager != nullptr ? m_svgfManager->dev_pingBuffer : nullptr,
             dev_sampleCounts,
             m_extent.width,
             i,
@@ -141,11 +142,17 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             currentActivePathCount, 
             m_cudaSurfaceObject, 
             dev_accumulatedColor,
+            m_svgfManager != nullptr ? m_svgfManager->dev_pingBuffer : nullptr,
             dev_sampleCounts, 
             m_extent.width);
     }
 
-    m_svgfManager->debugMotionVectors(m_cudaSurfaceObject);
+    m_svgfManager->executeTemporalAccumulation();
+
+    //m_svgfManager->debugMotionVectors(m_cudaSurfaceObject);
+    m_svgfManager->debugIlluminance(m_cudaSurfaceObject);
+
+    m_svgfManager->swapBuffers();
 
     m_frameIndex++;
 

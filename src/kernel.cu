@@ -44,13 +44,19 @@ __device__ void get2DIndex(int index1D, int width, int* outX, int* outY) {
 __device__ void writePathStateToSurface(const PathState& pathState, 
     cudaSurfaceObject_t surface, 
     glm::vec3* dev_accumulatedColor,
+    glm::vec4* dev_currentColor,
     unsigned int* dev_sampleCounts, 
-    int width) {
+    int width,
+    bool bHit) {
     int pixelIndex = pathState.pixelIndex;
 
     unsigned int currentSampleIndex = atomicAdd(&dev_sampleCounts[pixelIndex], 1);
 
     dev_accumulatedColor[pixelIndex] += pathState.accumulatedColor;
+    if (dev_currentColor != nullptr) {
+        float hitValue = bHit ? 1.0f : 0.0f;
+        dev_currentColor[pixelIndex] = glm::vec4(pathState.accumulatedColor, hitValue);
+    }
 
     // Get average color over all samples
     glm::vec3 averageColor = dev_accumulatedColor[pixelIndex] / (float)(currentSampleIndex + 1);
@@ -115,6 +121,10 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates,
     float jitterX = u01(rng) - 0.5f;
     float jitterY = u01(rng) - 0.5f;
 
+    // Uncomment for more stable svgf
+    jitterX = 0.0f;
+    jitterY = 0.0f;
+
     // Map to range [-1, 1]
     float normalizedX = (2.0f * (x + 0.5f + jitterX) / (float)width) - 1.0f;
     float normalizedY = 1.0f - (2.0f * (y + 0.5f + jitterY) / (float)height);
@@ -169,6 +179,7 @@ __global__ void kernShade(
     int activePathCount,
     cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
+    glm::vec4* dev_currentColor,
     unsigned int* dev_sampleCounts,
     int width,
     int iteration,
@@ -192,7 +203,7 @@ __global__ void kernShade(
     if (intersectionData.t <= 0.0f) {
         pathState.accumulatedColor += sampleEnvironmentMap(environmentMap, pathState.ray.direction);
         pathState.active = false;
-        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
+        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, pathState.bounceCount == 0);
         return;
     }
 
@@ -210,7 +221,7 @@ __global__ void kernShade(
 
         // Hitting a light terminates the path
         pathState.active = false;
-        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
+        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
         return;
     }
 
@@ -225,7 +236,7 @@ __global__ void kernShade(
         if (u01(rng) > survivalProbability) {
             // Terminate path
             pathState.active = false;
-            writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
+            writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
             return;
         }
 
@@ -267,7 +278,7 @@ __global__ void kernShade(
     // Did brdf return a valid value
     if (brdfWeight.x <= 0.0f && brdfWeight.y <= 0.0f && brdfWeight.z <= 0.0f) {
         pathState.active = false;
-        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
+        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
         return;
     }
 
@@ -283,6 +294,7 @@ __global__ void kernShade(
 
 __global__ void kernColorSurface(cudaSurfaceObject_t surface, 
     glm::vec3* dev_accumulatedColor,
+    glm::vec4* dev_currentColor,
     unsigned int* dev_sampleCounts, 
     PathState* dev_pathStates, 
     int n, 
@@ -296,7 +308,7 @@ __global__ void kernColorSurface(cudaSurfaceObject_t surface,
 
     PathState currentPathState = dev_pathStates[index];
 
-    writePathStateToSurface(currentPathState, surface, dev_accumulatedColor, dev_sampleCounts, width);
+    writePathStateToSurface(currentPathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
 }
 
 __global__ void kernDebugRays(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height)
@@ -370,6 +382,7 @@ void launchShadeKernel(PathState* dev_pathStates,
     int activePathCount,
     cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
+    glm::vec4* dev_currentColor,
     unsigned int* dev_sampleCounts,
     int width,
     int iteration,
@@ -385,6 +398,7 @@ void launchShadeKernel(PathState* dev_pathStates,
         activePathCount,
         surface,
         dev_accumulatedColor,
+        dev_currentColor,
         dev_sampleCounts,
         width,
         iteration,
@@ -395,6 +409,7 @@ void launchColorSurfaceKernel(PathState* dev_pathStates,
     int activePathCount,
     cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
+    glm::vec4* dev_currentColor,
     unsigned int* dev_sampleCounts,
     int width)
 {
@@ -403,6 +418,7 @@ void launchColorSurfaceKernel(PathState* dev_pathStates,
 
     kernColorSurface<<<gridSize, blockSize>>>(surface, 
         dev_accumulatedColor,
+        dev_currentColor,
         dev_sampleCounts,
         dev_pathStates, 
         activePathCount, 

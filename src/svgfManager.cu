@@ -42,6 +42,11 @@ __device__ glm::vec2 calculateMotionVector(
 	return prevScreen - currentScreen;
 }
 
+__device__ float computeLuminance(const glm::vec3& color)
+{
+	return 0.2126f * color.x + 0.7152f * color.y + 0.0722f * color.z;
+}
+
 __global__ void kernCaptureGBuffer(
 	const PathState* dev_pathStates,
 	const IntersectionData* dev_intersectionData,
@@ -81,6 +86,97 @@ __global__ void kernCaptureGBuffer(
 
 	if (dev_worldPositions != nullptr) {
 		dev_worldPositions[pixelIdx] = worldPos;
+	}
+}
+
+__global__ void kernTemporalAccumulation(
+	const glm::vec4* dev_gBuffer_normalDepth,
+	const glm::vec2* dev_gBuffer_motionVectors,
+	const glm::vec4* dev_gBuffer_normalDepthPrev,
+	const glm::vec4* dev_pingBuffer,      
+	const glm::vec4* dev_illuminationPrev,
+	const glm::vec2* dev_momentsPrev,
+
+	// Output Buffers
+	glm::vec4* dev_integratedColor,
+	glm::vec2* dev_moments,
+	unsigned int* dev_historyLength,
+	const unsigned int* dev_historyLengthPrev,
+	int width, int height)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x >= width || y >= height) {
+		return;
+	}
+
+	int pixelIndex = y * width + x;
+
+	glm::vec4 currentND = dev_gBuffer_normalDepth[pixelIndex];
+	float currentDepth = currentND.w;
+
+	if (currentDepth < 0.0f) {
+		// TODO: This won't work with environment maps
+		dev_integratedColor[pixelIndex] = dev_pingBuffer[pixelIndex];
+		dev_moments[pixelIndex] = glm::vec2(0.0f);
+		dev_historyLength[pixelIndex] = 0;
+		return;
+	}
+
+	glm::vec3 currentNormal = glm::vec3(currentND.x, currentND.y, currentND.z);
+	glm::vec4 currentColor = dev_pingBuffer[pixelIndex];
+
+	float currentLuminance = computeLuminance(currentColor);
+
+	// Get prev x and y from motion vector
+	glm::vec2 motionVector = dev_gBuffer_motionVectors[pixelIndex];
+	int prevX = __float2int_rn((float)x + motionVector.x);
+	int prevY = __float2int_rn((float)y + motionVector.y);
+
+	bool bValidHistory = false;
+	float alpha = 1.0f;
+	unsigned int updatedHistoryCount = 1;
+	int prevPixelIndex = -1;
+
+	if (prevX >= 0 && prevX < width && prevY >= 0 && prevY < height) {
+		// Prev is samplable
+
+		prevPixelIndex = prevY * width + prevX;
+
+		glm::vec4 prevND = dev_gBuffer_normalDepthPrev[prevPixelIndex];
+		float prevDepth = prevND.w;
+		glm::vec3 prevNormal = glm::vec3(prevND.x, prevND.y, prevND.z);
+
+		float normalDot = glm::dot(currentNormal, prevNormal);
+
+		float depthDiff = glm::abs(currentDepth - prevDepth) / glm::max(currentDepth, 1e-4f);
+
+		// We want the normals to be very similar and the difference in depth to be somewhat small
+		if (normalDot > 0.95f && depthDiff < 0.1f && prevDepth >= 0.0f) {
+			bValidHistory = true;
+			unsigned int historicalCount = dev_historyLengthPrev[prevPixelIndex];
+
+			updatedHistoryCount = glm::min(historicalCount + 1, 128U);
+
+			alpha = glm::max(1.0f / (float)updatedHistoryCount, 0.01f);
+		}
+	}
+
+	dev_historyLength[pixelIndex] = updatedHistoryCount;
+
+	glm::vec2 currentMoments = glm::vec2(currentLuminance, currentLuminance * currentLuminance);
+
+	// Write integrated color and moments back to buffers
+	if (bValidHistory && prevPixelIndex >= 0) {
+		dev_integratedColor[pixelIndex] = glm::mix(dev_illuminationPrev[prevPixelIndex], currentColor, alpha);
+
+		dev_moments[pixelIndex] = glm::mix(dev_momentsPrev[prevPixelIndex], currentMoments, alpha);
+	}
+	else {
+		dev_integratedColor[pixelIndex] = currentColor;
+
+		dev_moments[pixelIndex] = currentMoments;
 	}
 }
 
@@ -129,6 +225,37 @@ __global__ void kernDebugMotionVectors(glm::vec2* dev_gBuffer_motionVectors, cud
 	drawVec3ToSurface(visualVector, surface, x, y);
 }
 
+__global__ void kernDebugSVGFIllumination(
+	const glm::vec4* dev_pingBuffer,
+	cudaSurfaceObject_t surface,
+	int width, int height)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x >= width || y >= height) return;
+
+	int pixelIndex = y * width + x;
+
+	// Read the accumulated HDR illumination from SVGF
+	glm::vec3 hdrColor = glm::vec3(dev_pingBuffer[pixelIndex]);
+
+	// Apply simple Gamma Correction (2.2) and clamp to visible bounds
+	glm::vec3 finalColor;
+	finalColor.x = glm::clamp(powf(hdrColor.x, 1.0f / 2.2f), 0.0f, 1.0f);
+	finalColor.y = glm::clamp(powf(hdrColor.y, 1.0f / 2.2f), 0.0f, 1.0f);
+	finalColor.z = glm::clamp(powf(hdrColor.z, 1.0f / 2.2f), 0.0f, 1.0f);
+
+	// Pack into the uchar4 format your display surface expects
+	uchar4 pixelColor;
+	pixelColor.x = (unsigned char)(finalColor.z * 255.0f); // Blue
+	pixelColor.y = (unsigned char)(finalColor.y * 255.0f); // Green
+	pixelColor.z = (unsigned char)(finalColor.x * 255.0f); // Red
+	pixelColor.w = 255;
+
+	surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
+}
+
 SVGFManager::SVGFManager()
 {
 }
@@ -156,6 +283,7 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 		dev_gBuffer_motionVectors = other.dev_gBuffer_motionVectors;
 		dev_gBuffer_historyLength = other.dev_gBuffer_historyLength;
 		dev_gBuffer_normalDepthPrev = other.dev_gBuffer_normalDepthPrev;
+		dev_gBuffer_historyLengthPrev = other.dev_gBuffer_historyLengthPrev;
 		dev_illuminationPrev = other.dev_illuminationPrev;
 		dev_pingBuffer = other.dev_pingBuffer;
 		dev_pongBuffer = other.dev_pongBuffer;
@@ -169,6 +297,7 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 		other.dev_gBuffer_motionVectors = nullptr;
 		other.dev_gBuffer_historyLength = nullptr;
 		other.dev_gBuffer_normalDepthPrev = nullptr;
+		other.dev_gBuffer_historyLengthPrev = nullptr;
 		other.dev_illuminationPrev = nullptr;
 		other.dev_pingBuffer = nullptr;
 		other.dev_pongBuffer = nullptr;
@@ -189,7 +318,10 @@ void SVGFManager::swapBuffers()
 {
 	std::swap(dev_gBuffer_normalDepth, dev_gBuffer_normalDepthPrev);
 	std::swap(dev_moments, dev_momentsPrev);
-	std::swap(dev_illuminationPrev, dev_pongBuffer);
+	std::swap(dev_gBuffer_historyLength, dev_gBuffer_historyLengthPrev);
+
+	size_t numPixels = m_width * m_height;
+	cudaMemcpy(dev_illuminationPrev, dev_pingBuffer, numPixels * sizeof(glm::vec4), cudaMemcpyDeviceToDevice);
 }
 
 void SVGFManager::resize(int width, int height)
@@ -238,6 +370,35 @@ void SVGFManager::captureGBuffer(
 	m_prevViewProj = currentViewProj;
 }
 
+void SVGFManager::executeTemporalAccumulation()
+{
+	if (m_width <= 0 || m_height <= 0) {
+		return;
+	}
+
+	dim3 blockSize(16, 16);
+	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+
+	kernTemporalAccumulation << <gridSize, blockSize >> > (
+		dev_gBuffer_normalDepth,
+		dev_gBuffer_motionVectors,
+		dev_gBuffer_normalDepthPrev,
+		dev_pingBuffer,
+		dev_illuminationPrev,
+		dev_momentsPrev,
+		// Outputs
+		dev_pongBuffer,
+		dev_moments,
+		dev_gBuffer_historyLength,
+		dev_gBuffer_historyLengthPrev,
+		m_width,
+		m_height
+		);
+
+	// Swap ping and pong buffers so we can use this output as input for future operations
+	std::swap(dev_pingBuffer, dev_pongBuffer);
+}
+
 void SVGFManager::debugNormals(cudaSurfaceObject_t surface)
 {
 	dim3 blockSize(16, 16);
@@ -254,6 +415,14 @@ void SVGFManager::debugMotionVectors(cudaSurfaceObject_t surface)
 	kernDebugMotionVectors << <gridSize, blockSize >> > (dev_gBuffer_motionVectors, surface, m_width, m_height);
 }
 
+void SVGFManager::debugIlluminance(cudaSurfaceObject_t surface)
+{
+	dim3 blockSize(16, 16);
+	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+
+	kernDebugSVGFIllumination << <gridSize, blockSize >> > (dev_pingBuffer, surface, m_width, m_height);
+}
+
 void SVGFManager::allocateBuffers()
 {
 	size_t numPixels = static_cast<size_t>(m_width) * m_height;
@@ -262,6 +431,7 @@ void SVGFManager::allocateBuffers()
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_normalDepthPrev, numPixels * sizeof(glm::vec4)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_motionVectors, numPixels * sizeof(glm::vec2)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_historyLength, numPixels * sizeof(unsigned int)));
+	CUDA_CHECK(cudaMalloc(&dev_gBuffer_historyLengthPrev, numPixels * sizeof(unsigned int)));
 
 	CUDA_CHECK(cudaMalloc(&dev_illuminationPrev, numPixels * sizeof(glm::vec4)));
 	CUDA_CHECK(cudaMalloc(&dev_pingBuffer, numPixels * sizeof(glm::vec4)));
@@ -293,6 +463,10 @@ void SVGFManager::freeBuffers()
 		cudaFree(dev_gBuffer_historyLength);
 	}
 
+	if (dev_gBuffer_historyLengthPrev) {
+		cudaFree(dev_gBuffer_historyLengthPrev);
+	}
+
 	if (dev_illuminationPrev) {
 		cudaFree(dev_illuminationPrev);
 	}
@@ -321,6 +495,7 @@ void SVGFManager::freeBuffers()
 	dev_gBuffer_normalDepthPrev = nullptr;
 	dev_gBuffer_motionVectors = nullptr; 
 	dev_gBuffer_historyLength = nullptr;
+	dev_gBuffer_historyLengthPrev = nullptr;
 	dev_illuminationPrev = nullptr;
 	dev_pingBuffer = nullptr; 
 	dev_pongBuffer = nullptr;
