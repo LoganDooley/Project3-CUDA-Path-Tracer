@@ -90,6 +90,16 @@ __global__ void kernCaptureGBuffer(
 		dev_worldPositions[pixelIdx] = worldPos;
 	}
 }
+__device__ bool isHistoryValid(
+	glm::vec3 currNormal, float currDepth,
+	glm::vec3 prevNormal, float prevDepth
+)
+{
+	float normalSimilarity = glm::dot(currNormal, prevNormal);
+	float depthDifference = glm::abs(currDepth - prevDepth) / glm::max(currDepth, 0.0001f);
+
+	return normalSimilarity > 0.95f && depthDifference < 0.1f && prevDepth >= 0.0f;
+}
 
 __global__ void kernTemporalAccumulation(
 	const glm::vec4* dev_gBuffer_normalDepth,
@@ -119,7 +129,6 @@ __global__ void kernTemporalAccumulation(
 	float currentDepth = currentND.w;
 
 	if (currentDepth < 0.0f) {
-		// TODO: This won't work with environment maps
 		dev_integratedColor[pixelIndex] = dev_pingBuffer[pixelIndex];
 		dev_moments[pixelIndex] = glm::vec2(0.0f);
 		dev_historyLength[pixelIndex] = 0;
@@ -128,63 +137,107 @@ __global__ void kernTemporalAccumulation(
 
 	glm::vec3 currentNormal = glm::vec3(currentND.x, currentND.y, currentND.z);
 	glm::vec4 currentColor = dev_pingBuffer[pixelIndex];
-
-	float currentLuminance = computeLuminance(currentColor);
-	currentLuminance = glm::clamp(currentLuminance, 0.0f, 30.f);
+	float currentLuminance = glm::clamp(computeLuminance(currentColor), 0.0f, 30.0f);
+	glm::vec2 currentMoments = glm::vec2(currentLuminance, currentLuminance * currentLuminance);
 
 	// Get prev x and y from motion vector
 	glm::vec2 motionVector = dev_gBuffer_motionVectors[pixelIndex];
-	int prevX = __float2int_rn((float)x + motionVector.x);
-	int prevY = __float2int_rn((float)y + motionVector.y);
+	glm::vec2 prevSubpixel = glm::vec2(x, y) + motionVector;
 
-	bool bValidHistory = false;
-	float alpha = 1.0f;
-	unsigned int updatedHistoryCount = 1;
-	int prevPixelIndex = -1;
+	// Get a 2x2 window
+	int x0 = __float2int_rd(prevSubpixel.x);
+	int y0 = __float2int_rd(prevSubpixel.y);
+	int x1 = x0 + 1;
+	int y1 = y0 + 1;
 
-	if (prevX >= 0 && prevX < width && prevY >= 0 && prevY < height) {
-		// Prev is samplable
+	glm::vec2 a = prevSubpixel - glm::vec2(x0, y0);
 
-		prevPixelIndex = prevY * width + prevX;
+	// Clamp to edges
+	x0 = glm::clamp(x0, 0, width - 1);
+	x1 = glm::clamp(x1, 0, width - 1);
+	y0 = glm::clamp(y0, 0, height - 1);
+	y1 = glm::clamp(y1, 0, height - 1);
 
-		glm::vec4 prevND = dev_gBuffer_normalDepthPrev[prevPixelIndex];
-		float prevDepth = prevND.w;
-		glm::vec3 prevNormal = glm::vec3(prevND.x, prevND.y, prevND.z);
+	// Get neighborhood values
+	int idx00 = y0 * width + x0;
+	int idx10 = y0 * width + x1;
+	int idx01 = y1 * width + x0;
+	int idx11 = y1 * width + x1;
 
-		float normalDot = glm::dot(currentNormal, prevNormal);
+	glm::vec4 nd00 = dev_gBuffer_normalDepthPrev[idx00];
+	glm::vec4 nd10 = dev_gBuffer_normalDepthPrev[idx10];
+	glm::vec4 nd01 = dev_gBuffer_normalDepthPrev[idx01];
+	glm::vec4 nd11 = dev_gBuffer_normalDepthPrev[idx11];
 
-		float depthDiff = glm::abs(currentDepth - prevDepth) / glm::max(currentDepth, 1e-4f);
+	// Check neighborhood validity
+	bool v00 = isHistoryValid(currentNormal, currentDepth, glm::vec3(nd00), nd00.w);
+	bool v10 = isHistoryValid(currentNormal, currentDepth, glm::vec3(nd10), nd10.w);
+	bool v01 = isHistoryValid(currentNormal, currentDepth, glm::vec3(nd01), nd01.w);
+	bool v11 = isHistoryValid(currentNormal, currentDepth, glm::vec3(nd11), nd11.w);
 
-		// We want the normals to be very similar and the difference in depth to be somewhat small
-		if (normalDot > 0.95f && depthDiff < 0.1f && prevDepth >= 0.0f) {
-			bValidHistory = true;
-			unsigned int historicalCount = dev_historyLengthPrev[prevPixelIndex];
+	// Bilinear blending coefficients
+	float w00 = (1.0f - a.x) * (1.0f - a.y);
+	float w10 = a.x * (1.0f - a.y);
+	float w01 = (1.0f - a.x) * a.y;
+	float w11 = a.x * a.y;
 
-			updatedHistoryCount = glm::min(historicalCount + 1, 32U);
+	glm::vec4 accumulatedColor = glm::vec4(0.0f);
+	glm::vec2 accumulatedMoments = glm::vec2(0.0f);
+	float totalHistoryCount = 0.0f;
+	float totalBilinearWeight = 0.0f;
 
-			alpha = glm::max(1.0f / (float)updatedHistoryCount, 0.05f);
-		}
+	// Run bilinear filtering
+	if (v00) {
+		accumulatedColor += dev_illuminationPrev[idx00] * w00; 
+		accumulatedMoments += dev_momentsPrev[idx00] * w00; 
+		totalHistoryCount += (float)dev_historyLengthPrev[idx00] * w00; 
+		totalBilinearWeight += w00;
+	}
+	if (v10) { 
+		accumulatedColor += dev_illuminationPrev[idx10] * w10; 
+		accumulatedMoments += dev_momentsPrev[idx10] * w10; 
+		totalHistoryCount += (float)dev_historyLengthPrev[idx10] * w10; 
+		totalBilinearWeight += w10; 
+	}
+	if (v01) { 
+		accumulatedColor += dev_illuminationPrev[idx01] * w01; 
+		accumulatedMoments += dev_momentsPrev[idx01] * w01; 
+		totalHistoryCount += (float)dev_historyLengthPrev[idx01] * w01; 
+		totalBilinearWeight += w01; 
+	}
+	if (v11) { 
+		accumulatedColor += dev_illuminationPrev[idx11] * w11; 
+		accumulatedMoments += dev_momentsPrev[idx11] * w11; 
+		totalHistoryCount += (float)dev_historyLengthPrev[idx11] * w11; 
+		totalBilinearWeight += w11; 
 	}
 
-	dev_historyLength[pixelIndex] = updatedHistoryCount;
+	if (totalBilinearWeight > 0.0f) {
+		// Normalize attributes
+		accumulatedColor /= totalBilinearWeight;
+		accumulatedMoments /= totalBilinearWeight;
 
-	glm::vec2 currentMoments = glm::vec2(currentLuminance, currentLuminance * currentLuminance);
+		// Update history length
+		unsigned int historicalCount = __float2uint_rn(totalHistoryCount / totalBilinearWeight);
+		unsigned int updatedHistoryCount = glm::min(historicalCount + 1, 32U);
+		dev_historyLength[pixelIndex] = updatedHistoryCount;
 
-	// Write integrated color and moments back to buffers
-	if (bValidHistory && prevPixelIndex >= 0) {
-		dev_integratedColor[pixelIndex] = glm::mix(dev_illuminationPrev[prevPixelIndex], currentColor, alpha);
+		float alpha = glm::max(1.0f / (float)updatedHistoryCount, 0.05f);
 
-		dev_moments[pixelIndex] = glm::mix(dev_momentsPrev[prevPixelIndex], currentMoments, alpha);
+		// Blend color and moments
+		dev_integratedColor[pixelIndex] = glm::mix(accumulatedColor, currentColor, alpha);
+		dev_moments[pixelIndex] = glm::mix(accumulatedMoments, currentMoments, alpha);
 	}
 	else {
+		// Failed to remap, reset to 1 spp
+		dev_historyLength[pixelIndex] = 1;
 		dev_integratedColor[pixelIndex] = currentColor;
-
 		dev_moments[pixelIndex] = currentMoments;
 	}
 }
 
 __device__ float calculateVariance(const glm::vec2& moments) {
-	return glm::max(0.0f, moments.x - moments.y * moments.y);
+	return glm::max(0.0f, moments.y - moments.x * moments.x);
 }
 
 __global__ void kernEstimateVariance(
@@ -214,7 +267,6 @@ __global__ void kernEstimateVariance(
 		return;
 	}
 	dev_variance[pixelIndex] = 0.0f;
-	return;
 
 	// If short history, use spatial varaince
 	glm::vec4 centerND = dev_gBuffer_normalDepth[pixelIndex];
@@ -327,6 +379,7 @@ __global__ void kernVariancePrefilter3x3(
 	else {
 		// Copy non blurred variance for rays missing geometry
 		dev_prefilteredVariance[pixelIndex] = dev_variance[pixelIndex];
+		//dev_prefilteredVariance[pixelIndex] = 0.0f;
 	}
 }
 
@@ -481,6 +534,7 @@ __global__ void kernAtrousFilter(
 			glm::vec3 normalQ = glm::vec3(neighborND);
 			glm::vec4 colorQ = dev_inputColor[neighborIndex];
 			float luminanceQ = computeLuminance(glm::vec3(colorQ));
+			float varianceQ = dev_inputVariance[neighborIndex];
 
 			float h_q = h[r + 2] * h[c + 2];
 
@@ -494,7 +548,7 @@ __global__ void kernAtrousFilter(
 			sumColor += h_q * w_pq * glm::vec3(colorQ);
 			sumColorWeight += h_q * w_pq;
 
-			sumVariance += h_q * h_q * w_pq * w_pq * varianceP;
+			sumVariance += h_q * h_q * w_pq * w_pq * varianceQ;
 			sumVarianceWeight += h_q * w_pq;
 		}
 	}

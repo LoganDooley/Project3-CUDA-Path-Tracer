@@ -27,6 +27,11 @@ public:
 
 	void saveCurrentRenderToFile(const std::string& filepath);
 
+	bool getSVGFEnabled() const {
+		return m_svgfManager != nullptr;
+	}
+	void setSVGFEnabled(bool bEnabled);
+
 private:
 	void cleanup();
 

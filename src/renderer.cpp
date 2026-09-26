@@ -80,7 +80,9 @@ void Renderer::resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
 
     cudaMemset(dev_accumulatedColor, 0, getPixelCount() * sizeof(glm::vec3));
 
-    m_svgfManager->resize(m_extent.width, m_extent.height);
+    if (m_svgfManager != nullptr) {
+        m_svgfManager->resize(m_extent.width, m_extent.height);
+    }
 }
 
 void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr<EnvironmentMap>& environmentMap, const Camera& camera, bool bClearAccumulatedSamples)
@@ -116,7 +118,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             scene,
             currentActivePathCount);
 
-        if (i == 0) {
+        if (i == 0 && m_svgfManager != nullptr) {
             m_svgfManager->captureGBuffer(dev_pathStates, dev_intersectionData, currentActivePathCount, camera);
         }
 
@@ -147,17 +149,19 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             m_extent.width);
     }
 
-    m_svgfManager->executeTemporalAccumulation();
+    if (m_svgfManager != nullptr) {
+        m_svgfManager->executeTemporalAccumulation();
 
-    m_svgfManager->executeVarianceEstimation();
+        m_svgfManager->executeVarianceEstimation();
 
-    m_svgfManager->executeAtrousFilteringPipeline();
+        m_svgfManager->executeAtrousFilteringPipeline();
 
-    //m_svgfManager->debugMotionVectors(m_cudaSurfaceObject);
-    m_svgfManager->debugIlluminance(m_cudaSurfaceObject);
-    //m_svgfManager->debugVariance(m_cudaSurfaceObject);
+        //m_svgfManager->debugMotionVectors(m_cudaSurfaceObject);
+        m_svgfManager->debugIlluminance(m_cudaSurfaceObject);
+        //m_svgfManager->debugVariance(m_cudaSurfaceObject);
 
-    m_svgfManager->swapBuffers();
+        m_svgfManager->swapBuffers();
+    }
 
     m_frameIndex++;
 
@@ -210,6 +214,19 @@ void Renderer::saveCurrentRenderToFile(const std::string& filepath)
     stbi_flip_vertically_on_write(false);
 
     stbi_write_png(filepath.c_str(), m_extent.width, m_extent.height, 3, outputImage.data(), m_extent.width * 3);
+}
+
+void Renderer::setSVGFEnabled(bool bEnabled)
+{
+    if (bEnabled) {
+        if (m_svgfManager == nullptr) {
+            m_svgfManager = std::make_unique<SVGFManager>();
+            m_svgfManager->resize(m_extent.width, m_extent.height);
+        }
+    }
+    else {
+        m_svgfManager = nullptr;
+    }
 }
 
 void Renderer::cleanup()
