@@ -8,7 +8,9 @@
 
 #include "kernel.h"
 
-Renderer::Renderer() {
+Renderer::Renderer() :
+    m_svgfManager(std::make_unique<SVGFManager>())
+{
 
 }
 
@@ -77,6 +79,8 @@ void Renderer::resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
     cudaMemset(dev_sampleCounts, 0, getPixelCount() * sizeof(unsigned int));
 
     cudaMemset(dev_accumulatedColor, 0, getPixelCount() * sizeof(glm::vec3));
+
+    m_svgfManager->resize(m_extent.width, m_extent.height);
 }
 
 void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr<EnvironmentMap>& environmentMap, const Camera& camera, bool bClearAccumulatedSamples)
@@ -112,6 +116,10 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             scene,
             currentActivePathCount);
 
+        if (i == 0) {
+            m_svgfManager->captureGBuffer(dev_pathStates, dev_intersectionData, currentActivePathCount, camera);
+        }
+
         launchShadeKernel(dev_pathStates,
             dev_intersectionData,
             scene,
@@ -136,6 +144,8 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             dev_sampleCounts, 
             m_extent.width);
     }
+
+    m_svgfManager->debugMotionVectors(m_cudaSurfaceObject);
 
     m_frameIndex++;
 

@@ -204,7 +204,9 @@ __global__ void kernShade(
     Material material = dev_scene.dev_materials[intersectionData.materialIndex];
 
     if (material.emittance > 0.0f) {
-        pathState.accumulatedColor += pathState.throughput * material.color * material.emittance;
+        if (pathState.bounceCount == 0) {
+            pathState.accumulatedColor += pathState.throughput * material.color * material.emittance;
+        }
 
         // Hitting a light terminates the path
         pathState.active = false;
@@ -232,15 +234,15 @@ __global__ void kernShade(
     }
     
     // Next Event Estimation
-    //if (!material.isSpecular()) {
-    //    // Do NEE for non perfectly specular lights
-    //    glm::vec4 neeRandom = glm::vec4(u01(rng), u01(rng), u01(rng), u01(rng));
+    if (!material.isSpecular()) {
+        // Do NEE for non perfectly specular lights
+        glm::vec4 neeRandom = glm::vec4(u01(rng), u01(rng), u01(rng), u01(rng));
 
-    //    float directLightingPdf = 0.0f;
-    //    glm::vec3 directLighting = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData, directLightingPdf);
+        float directLightingPdf = 0.0f;
+        glm::vec3 directLighting = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData, directLightingPdf);
 
-    //    pathState.accumulatedColor += pathState.throughput * directLighting;
-    //}
+        pathState.accumulatedColor += pathState.throughput * directLighting;
+    }
 
     // Generate diffuse ray direction
     glm::vec3 brdfWeight = glm::vec3(0.0f);

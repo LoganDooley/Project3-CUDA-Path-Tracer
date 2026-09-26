@@ -79,6 +79,7 @@ PRIVATE
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:
 		--expt-relaxed-constexpr
+		-Xcompiler=/std:c++17
         $<$<CONFIG:Debug>:-G>
         $<$<CONFIG:Release>:-O3>
         --generate-line-info

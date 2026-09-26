@@ -19,6 +19,8 @@ public:
 	void tick(float deltaTime, const InputState& inputState);
 	void rotate(const glm::vec2& mouseDelta);
 
+	glm::mat4 getViewProjectionMatrix(float width, float height) const;
+
 	glm::vec3 m_position = glm::vec3(0.0f, 0.0f, 3.0f);
 	glm::vec3 m_look = glm::vec3(0.0f, 0.0f, -1.0f);
 	glm::vec3 m_up = glm::vec3(0.0f, 1.0f, 0.0f);

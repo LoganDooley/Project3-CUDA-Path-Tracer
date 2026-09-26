@@ -68,3 +68,12 @@ void Camera::rotate(const glm::vec2& mouseDelta)
 
 	m_hasMoved = true;
 }
+
+glm::mat4 Camera::getViewProjectionMatrix(float width, float height) const
+{
+	glm::mat4 view = glm::lookAt(m_position, m_position + m_look, m_up);
+
+	glm::mat4 projection = glm::perspective(glm::radians(m_fovy), width / height, 0.1f, 1000.f);
+
+	return projection * view;
+}

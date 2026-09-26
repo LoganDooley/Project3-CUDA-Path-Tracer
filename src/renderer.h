@@ -8,6 +8,7 @@
 #include "scene.h"
 #include "camera.h"
 #include "environmentMap.h"
+#include "svgfManager.h"
 
 #include <memory>
 
@@ -46,4 +47,6 @@ private:
 	int m_activeRayCount = 0;
 
 	int m_frameIndex = 0;
+
+	std::unique_ptr<SVGFManager> m_svgfManager = nullptr;
 };
