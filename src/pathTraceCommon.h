@@ -39,6 +39,8 @@ struct PathState {
 	int bounceCount = 0;
 	bool active = true;
 	int pixelIndex = -1;
+
+	// For MIS
 	float previousBrdfPdf = 0.0f;
 	bool previousSpecular = true;
 };
@@ -67,6 +69,7 @@ struct Geom
 struct IntersectionData {
 	glm::vec3 normal = glm::vec3(1, 0, 0);
 	float t = -1.0f;
+	int geometryIndex = -1;
 	int materialIndex = 0;
 	bool bInside = false;
 };

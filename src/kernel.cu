@@ -197,9 +197,9 @@ __global__ void kernShade(
     }
 
     IntersectionData intersectionData = dev_intersectionData[index];
-
     PathState& pathState = dev_pathStates[index];
 
+    // Handle misses
     if (intersectionData.t <= 0.0f) {
         pathState.accumulatedColor += sampleEnvironmentMap(environmentMap, pathState.ray.direction);
         pathState.active = false;
@@ -207,6 +207,7 @@ __global__ void kernShade(
         return;
     }
 
+    // Handle invalid material (shouldn't happen)
     if (intersectionData.materialIndex >= dev_scene.m_materialCount) {
         pathState.active = false;
         return;
@@ -214,10 +215,26 @@ __global__ void kernShade(
 
     Material material = dev_scene.dev_materials[intersectionData.materialIndex];
 
+    // Handle hitting a light
     if (material.emittance > 0.0f) {
-        if (pathState.bounceCount == 0) {
-            pathState.accumulatedColor += pathState.throughput * material.color * material.emittance;
+        // What are the chances that this would be hit by sampling the lights previously 
+        float lightPdf = dev_scene.getLightPdf(intersectionData.geometryIndex, pathState.ray.getPositionAtTime(intersectionData.t), intersectionData.normal);
+
+		const float epsilon = 0.0001f;
+        float distance = intersectionData.t;
+        float cosThetaLight = glm::dot(intersectionData.normal, -pathState.ray.direction);
+
+        float lightPdfSolidAngle = 0.0f;
+        if(lightPdf > 0.0f && cosThetaLight > epsilon) {
+            lightPdfSolidAngle = (lightPdf * distance * distance) / cosThetaLight;
+		}
+
+        float misWeight = 1.0f;
+        if (!pathState.previousSpecular && (pathState.previousBrdfPdf + lightPdfSolidAngle) > 0.0f) {
+			misWeight = MathHelpers::powerHeuristic(pathState.previousBrdfPdf, lightPdfSolidAngle);
         }
+        
+        pathState.accumulatedColor += pathState.throughput * material.color * material.emittance * misWeight;
 
         // Hitting a light terminates the path
         pathState.active = false;
@@ -227,6 +244,56 @@ __global__ void kernShade(
 
     thrust::default_random_engine rng = makeSeededRandomEngine(frameIndex, index, iteration);
     thrust::uniform_real_distribution<float> u01(0, 1);
+    
+    // Next Event Estimation (Sample lights)
+    if (!material.isSpecular()) {
+        glm::vec4 neeRandom = glm::vec4(u01(rng), u01(rng), u01(rng), u01(rng));
+
+        float lightPdf = 0.0f;
+        glm::vec3 lightSample = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData, lightPdf);
+
+        if (lightPdf > 0.0f && pathState.previousBrdfPdf >= 0.0f) {
+			float misWeight = MathHelpers::powerHeuristic(lightPdf, pathState.previousBrdfPdf);
+			pathState.accumulatedColor += pathState.throughput * lightSample * misWeight;
+        }
+    }
+
+	// Indirect lighting (Sample BRDF)
+    glm::vec3 brdfWeight = glm::vec3(0.0f);
+    glm::vec3 wi = -pathState.ray.direction;
+    glm::vec3 wo = glm::vec3(0.0f);
+
+    float epsilonSign = 1.0f;
+
+    float brdfPdf = 0.0f;
+    wo = material.pickOugoingDirection(intersectionData.normal, wi, glm::vec2(u01(rng), u01(rng)), intersectionData.bInside, brdfPdf);
+    brdfWeight = material.evaluateBrdf(intersectionData.normal, wi, wo, true);
+
+    // Update path state history tracking
+	pathState.previousBrdfPdf = brdfPdf;
+	pathState.previousSpecular = material.isSpecular();
+
+    // Handle invalid pdf
+    if (brdfPdf <= 0.0f) {
+        pathState.active = false;
+        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
+        return;
+	}
+
+    brdfWeight /= brdfPdf;
+
+    // If throughput will be zero, terminate the path
+    if (brdfWeight.x <= 0.0f && brdfWeight.y <= 0.0f && brdfWeight.z <= 0.0f) {
+        pathState.active = false;
+        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
+        return;
+    }
+
+    pathState.throughput *= brdfWeight;
+
+    // Update ray for next iteration
+    glm::vec3 intersectionPosition = pathState.ray.getPositionAtTime(intersectionData.t);
+    pathState.ray = Ray::generateBouncedRay(intersectionData.normal, intersectionPosition, wo);
 
     // Run russian roulette
     if (pathState.bounceCount >= MIN_RUSSIAN_ROULETTE_BOUNCES) {
@@ -243,50 +310,6 @@ __global__ void kernShade(
         // Compensate for survival probability
         pathState.throughput /= survivalProbability;
     }
-    
-    // Next Event Estimation
-    if (!material.isSpecular()) {
-        // Do NEE for non perfectly specular lights
-        glm::vec4 neeRandom = glm::vec4(u01(rng), u01(rng), u01(rng), u01(rng));
-
-        float directLightingPdf = 0.0f;
-        glm::vec3 directLighting = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData, directLightingPdf);
-
-        pathState.accumulatedColor += pathState.throughput * directLighting;
-    }
-
-    // Generate diffuse ray direction
-    glm::vec3 brdfWeight = glm::vec3(0.0f);
-    glm::vec3 wi = -pathState.ray.direction;
-    glm::vec3 wo = glm::vec3(0.0f);
-
-    float epsilonSign = 1.0f;
-
-    float brdfPdf = 0.0f;
-    wo = material.pickOugoingDirection(intersectionData.normal, wi, glm::vec2(u01(rng), u01(rng)), intersectionData.bInside, brdfPdf);
-    brdfWeight = material.evaluateBrdf(intersectionData.normal, wi, wo, true);
-
-    if (!material.isSpecular()) {
-        if (brdfPdf > 0.0f) {
-            brdfWeight /= brdfPdf;
-        }
-        else {
-            brdfWeight = glm::vec3(0.0f);
-        }
-    }
-
-    // Did brdf return a valid value
-    if (brdfWeight.x <= 0.0f && brdfWeight.y <= 0.0f && brdfWeight.z <= 0.0f) {
-        pathState.active = false;
-        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
-        return;
-    }
-
-    pathState.throughput *= brdfWeight;
-
-    // Update ray for next iteration
-    glm::vec3 intersectionPosition = pathState.ray.getPositionAtTime(intersectionData.t);
-    pathState.ray = Ray::generateBouncedRay(intersectionData.normal, intersectionPosition, wo);
 
     // Increment bounce count
     pathState.bounceCount += 1;

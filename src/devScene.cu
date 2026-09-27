@@ -10,6 +10,7 @@ __device__ IntersectionData DevScene::intersect(const Ray& ray) {
         if (intersection.t > 0.0f) {
             if (closestIntersection.t < 0.0f || intersection.t < closestIntersection.t) {
                 closestIntersection = intersection;
+                closestIntersection.geometryIndex = i;
             }
         }
     }
@@ -36,13 +37,15 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
 
     int chosenLightIndex = (int)(random.w * (float)m_lightCount);
 
-    if (chosenLightIndex >= m_geometryCount) {
+    if (chosenLightIndex < 0 || chosenLightIndex >= m_lightCount) {
+        outPdf = 0.0f;
         return glm::vec3(0.0f);
     }
 
     Geom lightGeometry = dev_geometry[chosenLightIndex];
 
     if (lightGeometry.materialid >= m_materialCount) {
+        outPdf = 0.0f;
         return glm::vec3(0.0f);
     }
 
@@ -73,12 +76,12 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
     float cosThetaSurface = glm::dot(intersectionData.normal, visibilityRay.direction);
 
     if (cosThetaLight <= 0.0f || cosThetaSurface <= 0.0f) {
+        outPdf = 0.0f;
         return glm::vec3(0.0f);
     }
 
-    bool bVisible = isVisible(visibilityRay, distance - epsilon);
-
-    if (!bVisible) {
+    if (!isVisible(visibilityRay, distance - epsilon)) {
+        outPdf = 0.0f;
         return glm::vec3(0.0f);
     }
 
@@ -86,14 +89,66 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
 
     Material surfaceMaterial = dev_materials[intersectionData.materialIndex];
 
-    glm::vec3 brdfWeight = glm::vec3(0.0f);
-    glm::vec3 wi = -incomingRay.direction;
-    glm::vec3 wo = visibilityRay.direction;
+    glm::vec3 brdf = surfaceMaterial.evaluateBrdf(intersectionData.normal, -incomingRay.direction, visibilityRay.direction, false);
 
-    brdfWeight = surfaceMaterial.evaluateBrdf(intersectionData.normal, wi, wo, false);
+    float pArea = lightSurfacePdf;
+	float pOmega = pArea * distance * distance / cosThetaLight;
+    outPdf = pOmega * lightIndexPdf;
 
-    float geometryTerm = cosThetaLight / (distance * distance);
+    return (brdf * emission) / outPdf;
+}
 
-    outPdf = lightSurfacePdf * lightIndexPdf;
-    return (brdfWeight * emission * geometryTerm) / outPdf;
+__device__ float DevScene::getLightPdf(int lightIndex, const glm::vec3& worldPosition, const glm::vec3& worldNormal)
+{
+    if(lightIndex < 0 || lightIndex >= m_lightCount) {
+        return 0.0f;
+	}
+
+	Geom lightGeometry = dev_geometry[lightIndex];
+
+    glm::mat3 transform3 = glm::mat3(lightGeometry.transform);
+    glm::mat3 invTranspose3 = glm::mat3(lightGeometry.invTranspose);
+
+    float lightIndexPdf = 1.0 / (float)m_lightCount;
+
+    float localPdf = 0.0f;
+    glm::vec3 localNormal = glm::vec3(0.0f);
+
+    if (lightGeometry.type == GeomType::SPHERE) {
+        constexpr float sphereArea = 4.0f * glm::pi<float>() * 0.25f;
+		localPdf = 1.0f / sphereArea;
+
+        localNormal = glm::transpose(transform3) * worldNormal;
+        localNormal = glm::normalize(localNormal);
+    }
+    else {
+		localPdf = 1.0f / 6.0f;
+
+        glm::vec3 localPos = glm::vec3(lightGeometry.inverseTransform * glm::vec4(worldPosition, 1.0f));
+
+        glm::vec3 absPos = glm::abs(localPos);
+        if (absPos.x > absPos.y && absPos.x > absPos.z) {
+            localNormal = glm::vec3(glm::sign(localPos.x), 0.0f, 0.0f);
+        }
+        else if (absPos.y > absPos.z) {
+            localNormal = glm::vec3(0.0f, glm::sign(localPos.y), 0.0f);
+        }
+        else {
+            localNormal = glm::vec3(0.0f, 0.0f, glm::sign(localPos.z));
+        }
+    }
+
+    glm::vec3 worldNormalScaled = invTranspose3 * localNormal;
+    float normalScale = glm::length(worldNormalScaled);
+
+	float det = glm::abs(glm::determinant(transform3));
+    float jacobian = det * normalScale;
+
+    if (jacobian <= 0.0f) {
+        return 0.0f;
+    }
+
+	localPdf /= jacobian;
+
+	return localPdf * lightIndexPdf;
 }

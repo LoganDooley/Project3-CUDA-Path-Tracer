@@ -3,6 +3,7 @@
 #include <glm/glm.hpp>
 
 #include "pathTraceCommon.h"
+#include "scene.h"
 
 #include "camera.h"
 #include <optional>
@@ -52,7 +53,8 @@ public:
 		const PathState* dev_pathStates,
 		const IntersectionData* dev_intersectionData,
 		int activePathCount,
-		const Camera& camera);
+		const Camera& camera,
+		const std::unique_ptr<Scene>& scene);
 
 	void executeTemporalAccumulation();
 
@@ -72,6 +74,7 @@ public:
 	glm::vec4* dev_gBuffer_normalDepth = nullptr;
 	glm::vec2* dev_gBuffer_motionVectors = nullptr;
 	unsigned int* dev_gBuffer_historyLength = nullptr;
+	float* dev_gBuffer_roughness = nullptr;
 
 	// Previous G Buffers
 	glm::vec4* dev_gBuffer_normalDepthPrev = nullptr;

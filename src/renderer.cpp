@@ -8,8 +8,7 @@
 
 #include "kernel.h"
 
-Renderer::Renderer() :
-    m_svgfManager(std::make_unique<SVGFManager>())
+Renderer::Renderer()
 {
 
 }
@@ -119,7 +118,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             currentActivePathCount);
 
         if (i == 0 && m_svgfManager != nullptr) {
-            m_svgfManager->captureGBuffer(dev_pathStates, dev_intersectionData, currentActivePathCount, camera);
+            m_svgfManager->captureGBuffer(dev_pathStates, dev_intersectionData, currentActivePathCount, camera, scene);
         }
 
         launchShadeKernel(dev_pathStates,
