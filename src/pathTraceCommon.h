@@ -48,7 +48,14 @@ struct PathState {
 enum GeomType
 {
 	SPHERE,
-	CUBE
+	CUBE,
+	MESH
+};
+
+struct Triangle {
+	glm::vec3 v0;
+	glm::vec3 v1;
+	glm::vec3 v2;
 };
 
 struct Geom
@@ -64,6 +71,10 @@ struct Geom
 	glm::mat4 transform = glm::mat4(1.0f);
 	glm::mat4 inverseTransform = glm::mat4(1.0f);
 	glm::mat4 invTranspose = glm::mat4(1.0f);
+
+	int triangleOffset = 0;
+	int triangleCount = 0;
+	float surfaceArea = 0.0f; // Incorrect method for MIS temporarily
 };
 
 struct IntersectionData {
@@ -76,7 +87,7 @@ struct IntersectionData {
 
 class IntersectionStatics {
 public:
-	__device__ static IntersectionData intersectGeometry(const Ray& ray, const Geom& geometry) {
+	__device__ static IntersectionData intersectGeometry(const Ray& ray, const Geom& geometry, const Triangle* sceneTriangles) {
 		// Convert world space -> object spce
 		Ray objectSpaceRay = ray.transform(geometry.inverseTransform);
 		
@@ -85,8 +96,11 @@ public:
 		if (geometry.type == GeomType::SPHERE) {
 			result = intersectSphere(objectSpaceRay);
 		}
-		else {
+		else if (geometry.type == GeomType::CUBE) {
 			result = intersectBox(objectSpaceRay);
+		}
+		else if (geometry.type == GeomType::MESH) {
+			result = intersectMesh(objectSpaceRay, geometry.triangleOffset, geometry.triangleCount, sceneTriangles);
 		}
 		
 		if (result.t <= 0.0f) {
@@ -192,6 +206,49 @@ private:
 		}
 		else {
 			result.normal.z = (ray.direction.z > 0.0f) ? -1.0f : 1.0f;
+		}
+
+		// Flip the normal if we were inside
+		float normalSign = result.bInside ? -1.0f : 1.0f;
+		result.normal *= normalSign;
+
+		return result;
+	}
+
+	__device__ static IntersectionData intersectMesh(const Ray& ray, int triangleOffset, int triangleCount, const Triangle* sceneTriangles) {
+		IntersectionData result = IntersectionData{};
+
+		// Loop over all triangles
+		for (int i = 0; i < triangleCount; i++) {
+			const Triangle& tri = sceneTriangles[triangleOffset + i];
+			
+			// Fast ray triangle intersection
+			const float EPSILON = 1e-8f;
+			glm::vec3 edge1 = tri.v1 - tri.v0;
+			glm::vec3 edge2 = tri.v2 - tri.v0;
+			glm::vec3 h = glm::cross(ray.direction, edge2);
+			float a = glm::dot(edge1, h);
+			if (fabs(a) < EPSILON) {
+				// Parallel to triangle, ignore
+				continue;
+			}
+			float f = 1.0f / a;
+			glm::vec3 s = ray.origin - tri.v0;
+			float u = f * glm::dot(s, h);
+			if (u < 0.0f || u > 1.0f) {
+				continue;
+			}
+			glm::vec3 q = glm::cross(s, edge1);
+			float v = f * glm::dot(ray.direction, q);
+			if (v < 0.0f || u + v > 1.0f) {
+				continue;
+			}
+			float t = f * glm::dot(edge2, q);
+			if (t > EPSILON && (result.t < 0.0f || t < result.t)) {
+				result.t = t;
+				result.normal = MathHelpers::safeNormalize(glm::cross(edge1, edge2));
+				result.bInside = glm::dot(result.normal, ray.direction) > 0.0f;
+			}
 		}
 
 		// Flip the normal if we were inside

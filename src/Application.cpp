@@ -748,7 +748,7 @@ void Application::pickSceneFile()
 	NFD::Guard nfdGuard;
 	nfdfilteritem_t filterItem[1] = {
 		{ "Scene Files",
-		"json" }
+		"json,gltf,glb" }
 	};
 	NFD::UniquePath outPath;
 

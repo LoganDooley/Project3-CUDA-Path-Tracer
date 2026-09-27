@@ -22,6 +22,8 @@ public:
 		return DevScene{
 			dev_geometry,
 			m_geometryCount,
+			dev_triangles,
+			m_triangleCount,
 			dev_materials,
 			m_materialCount,
 			m_lightCount
@@ -30,6 +32,9 @@ public:
 
 	Geom* dev_geometry = nullptr;
 	size_t m_geometryCount = 0;
+
+	Triangle* dev_triangles = nullptr;
+	size_t m_triangleCount = 0;
 
 	Material* dev_materials = nullptr;
 	size_t m_materialCount = 0;
@@ -41,4 +46,8 @@ public:
 class SceneLoader {
 public:
 	static std::unique_ptr<Scene> loadFromFile(const std::string& filepath);
+
+private:
+	static std::unique_ptr<Scene> loadFromJson(const std::string& filepath);
+	static std::unique_ptr<Scene> loadFromGltf(const std::string& filepath);
 };

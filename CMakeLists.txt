@@ -30,6 +30,7 @@ add_subdirectory(external/json)
 # Native File Dialogs Setup
 add_subdirectory(external/NFDe)
 
+# Vulkan Setup
 find_package(Vulkan REQUIRED)
 
 file(GLOB_RECURSE SOURCE_FILES
@@ -55,6 +56,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 	external/stb/
 	external/imgui/
 	external/imgui/backends
+	external/tinygltf/
 	${CUDAToolkit_INCLUDE_DIRS}
 )
 

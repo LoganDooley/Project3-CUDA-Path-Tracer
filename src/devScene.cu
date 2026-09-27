@@ -6,7 +6,7 @@
 __device__ IntersectionData DevScene::intersect(const Ray& ray) {
     IntersectionData closestIntersection = IntersectionData{};
     for (int i = 0; i < m_geometryCount; i++) {
-        IntersectionData intersection = IntersectionStatics::intersectGeometry(ray, dev_geometry[i]);
+        IntersectionData intersection = IntersectionStatics::intersectGeometry(ray, dev_geometry[i], dev_triangles);
         if (intersection.t > 0.0f) {
             if (closestIntersection.t < 0.0f || intersection.t < closestIntersection.t) {
                 closestIntersection = intersection;
@@ -121,7 +121,7 @@ __device__ float DevScene::getLightPdf(int lightIndex, const glm::vec3& worldPos
         localNormal = glm::transpose(transform3) * worldNormal;
         localNormal = glm::normalize(localNormal);
     }
-    else {
+    else if (lightGeometry.type == GeomType::CUBE){
 		localPdf = 1.0f / 6.0f;
 
         glm::vec3 localPos = glm::vec3(lightGeometry.inverseTransform * glm::vec4(worldPosition, 1.0f));
@@ -137,6 +137,17 @@ __device__ float DevScene::getLightPdf(int lightIndex, const glm::vec3& worldPos
             localNormal = glm::vec3(0.0f, 0.0f, glm::sign(localPos.z));
         }
     }
+    else if (lightGeometry.type == GeomType::MESH) {
+        if(lightGeometry.surfaceArea <= 0.0f) {
+            return 0.0f;
+		}
+        localPdf = 1.0f / lightGeometry.surfaceArea;
+        localNormal = glm::transpose(transform3) * worldNormal;
+        localNormal = glm::normalize(localNormal);
+    }
+    else {
+        return 0.0f;
+	}
 
     glm::vec3 worldNormalScaled = invTranspose3 * localNormal;
     float normalScale = glm::length(worldNormalScaled);

@@ -69,15 +69,22 @@ public:
 		return outgoing;
 	}
 
-	__host__ __device__ static glm::vec3 sampleGeometry(const Geom& geometry, glm::vec3& random, glm::vec3& outNormal, float& outPdf) {
+	__host__ __device__ static glm::vec3 sampleGeometry(const Geom& geometry, const Triangle* dev_triangles, glm::vec3& random, glm::vec3& outNormal, float& outPdf) {
 		glm::vec3 localSamplePoint = glm::vec3(0.0f);
 		glm::vec3 localSampleNormal = glm::vec3(0.0f);
 		float localPdf = 1.0f;
 		if (geometry.type == GeomType::CUBE) {
 			localSamplePoint = sampleUnitCube(random, localSampleNormal, localPdf);
 		}
-		else {
+		else if (geometry.type == GeomType::SPHERE) {
 			localSamplePoint = sampleUnitSphere(glm::vec2(random.x, random.y), localSampleNormal, localPdf);
+		}
+		else if (geometry.type == GeomType::MESH) {
+			localSamplePoint = sampleMesh(geometry, dev_triangles, random, localSampleNormal, localPdf);
+		}
+		else {
+			outPdf = 0.0f;
+			return glm::vec3(0.0f);
 		}
 
 		glm::vec3 worldNormal = glm::vec3(geometry.invTranspose * glm::vec4(localSampleNormal, 0.0f));
@@ -189,5 +196,50 @@ private:
 			outNormal = glm::vec3(0.0, 0.0, -1.0);
 			return glm::vec3(u, v, -0.5);
 		}
+	}
+
+	__host__ __device__ static glm::vec3 sampleMesh(
+		const Geom& geometry,
+		const Triangle* dev_triangles,
+		const glm::vec3& random,
+		glm::vec3& outNormal,
+		float& outPdf
+	) {
+		if(geometry.triangleCount <= 0) {
+			outPdf = 0.0f;
+			outNormal = glm::vec3(0.0f, 1.0f, 0.0f);
+			return glm::vec3(0.0f);
+		}
+
+		// Pick triangle at random (not weighted by surface area)
+		int triangleIndex = (int)(random.x * geometry.triangleCount);
+		const Triangle& tri = dev_triangles[geometry.triangleOffset + triangleIndex];
+
+		// Sample using barycentric coordinates
+		float u = random.y;
+		float v = random.z;
+		if (u + v > 1.0f) {
+			u = 1.0f - u;
+			v = 1.0f - v;
+		}
+		float w = 1.0f - u - v;
+
+		glm::vec3 localSamplePoint = u * tri.v0 + v * tri.v1 + w * tri.v2;
+
+		// Get object space normal
+		glm::vec3 edge1 = tri.v1 - tri.v0;
+		glm::vec3 edge2 = tri.v2 - tri.v0;
+		outNormal = MathHelpers::safeNormalize(glm::cross(edge1, edge2));
+
+		// Calculate pdf
+		float triangleArea = 0.5f * glm::length(glm::cross(edge1, edge2));
+		if(triangleArea <= 0.0f) {
+			outPdf = 0.0f;
+		} else {
+			// pdf is 1 / (area * num triangles)
+			outPdf = 1.0f / (triangleArea * geometry.triangleCount);
+		}
+
+		return localSamplePoint;
 	}
 };
