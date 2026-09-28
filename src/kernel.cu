@@ -102,7 +102,8 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates,
     glm::vec3 cameraRight, 
     glm::vec3 cameraUp, 
     float fovY, 
-    int frameIndex)
+    int frameIndex,
+    bool bMSAAEnabled)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -114,16 +115,17 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates,
     // row major pixel indexing
     int pixelIndex = y * width + x;
 
-    // Add antialiasing by jittering the ray
-    thrust::default_random_engine rng = makeSeededRandomEngine(frameIndex, pixelIndex, 0);
-    thrust::uniform_real_distribution<float> u01(0, 1);
-
-    float jitterX = u01(rng) - 0.5f;
-    float jitterY = u01(rng) - 0.5f;
-
     // Uncomment for more stable svgf
-    jitterX = 0.0f;
-    jitterY = 0.0f;
+    float jitterX = 0.0f;
+    float jitterY = 0.0f;
+
+    if (bMSAAEnabled) {
+        // Add antialiasing by jittering the ray
+        thrust::default_random_engine rng = makeSeededRandomEngine(frameIndex, pixelIndex, 0);
+        thrust::uniform_real_distribution<float> u01(0, 1);
+        jitterX = u01(rng) - 0.5f;
+		jitterY = u01(rng) - 0.5f;
+    }
 
     // Map to range [-1, 1]
     float normalizedX = (2.0f * (x + 0.5f + jitterX) / (float)width) - 1.0f;
@@ -376,7 +378,12 @@ __global__ void fillSurfaceColorKernel(cudaSurfaceObject_t surface, int width, i
     surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
 }
 
-void launchCameraRayGenKernel(PathState* dev_pathStates, int width, int height, const Camera& camera, int frameIndex)
+void launchCameraRayGenKernel(
+    PathState* dev_pathStates, 
+    int width, int height, 
+    const Camera& camera, 
+    int frameIndex,
+    bool bMSAAEnabled)
 {
     dim3 blockSize(16, 16);
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
@@ -384,7 +391,8 @@ void launchCameraRayGenKernel(PathState* dev_pathStates, int width, int height, 
     kernGenerateCameraRays << <gridSize, blockSize >> > (
         dev_pathStates, width, height,
         camera.m_position, camera.m_look, camera.m_right, camera.m_up, camera.m_fovy, 
-        frameIndex);
+        frameIndex,
+        bMSAAEnabled);
 }
 
 void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, const std::unique_ptr<Scene>& scene, int activePathCount)

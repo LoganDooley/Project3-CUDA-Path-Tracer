@@ -9,6 +9,7 @@
 #include "camera.h"
 #include "environmentMap.h"
 #include "svgfManager.h"
+#include "renderSettings.h"
 
 #include <memory>
 
@@ -27,15 +28,14 @@ public:
 
 	void saveCurrentRenderToFile(const std::string& filepath);
 
-	bool getSVGFEnabled() const {
-		return m_svgfManager != nullptr;
-	}
-	void setSVGFEnabled(bool bEnabled);
+	void drawRenderSettingsImGui();
 
 private:
 	void cleanup();
 
 	int getPixelCount() const { return m_extent.width * m_extent.height; }
+
+	RenderSettings m_renderSettings;
 
 	cudaExternalMemory_t m_cudaExtMemory = nullptr;
 	cudaMipmappedArray_t m_cudaMipmappedArray = nullptr;

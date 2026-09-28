@@ -726,11 +726,7 @@ void Application::renderImGui()
 	if (ImGui::Button("Save Render to File")) {
 		saveCurrentRender();
 	}
-	ImGui::Text("Render Settings:");
-	bool bSVGFEnabled = m_renderer.getSVGFEnabled();
-	if(ImGui::Checkbox("Use SVGF", &bSVGFEnabled)) {
-		m_renderer.setSVGFEnabled(bSVGFEnabled);
-	}
+	m_renderer.drawRenderSettingsImGui();
 	ImGui::Text("Performance Stats:");
 	ImGui::Text("FPS: %.1f", currentFps);
 	ImGui::Text("Frame Time: %.2f ms", currentFrameTimeMs);

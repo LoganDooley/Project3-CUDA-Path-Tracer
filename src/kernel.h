@@ -18,7 +18,8 @@ __global__ void kernGenerateCameraRays(
 	glm::vec3 cameraRight,
 	glm::vec3 cameraUp,
 	float fovY,
-	int frameIndex);
+	int frameIndex,
+	bool bMSAAEnabled);
 
 __global__ void kernIntersect(
 	PathState* dev_pathStates,
@@ -58,7 +59,8 @@ __global__ void fillSurfaceColorKernel(cudaSurfaceObject_t surface, int width, i
 void launchCameraRayGenKernel(PathState* dev_pathStates,
 	int width, int height,
 	const Camera& camera,
-	int frameIndex);
+	int frameIndex,
+	bool bMSAAEnabled);
 
 void launchIntersectKernel(PathState* dev_pathStates,
 	IntersectionData* dev_intersectionData, 

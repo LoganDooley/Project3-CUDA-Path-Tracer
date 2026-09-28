@@ -1,6 +1,7 @@
 #include "renderer.h"
 
 #include "stb_image_write.h"
+#include "imgui.h"
 
 #include <vector>
 #include <algorithm>
@@ -8,7 +9,8 @@
 
 #include "kernel.h"
 
-Renderer::Renderer()
+Renderer::Renderer() :
+    m_renderSettings(RenderSettings{})
 {
 
 }
@@ -105,7 +107,8 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
         m_extent.width,
         m_extent.height,
         camera,
-        m_frameIndex);
+        m_frameIndex,
+        m_renderSettings.bMSAAEnabled);
 
     for (int i = 0; i < maxBounces; i++) {
         if (currentActivePathCount <= 0) {
@@ -215,16 +218,27 @@ void Renderer::saveCurrentRenderToFile(const std::string& filepath)
     stbi_write_png(filepath.c_str(), m_extent.width, m_extent.height, 3, outputImage.data(), m_extent.width * 3);
 }
 
-void Renderer::setSVGFEnabled(bool bEnabled)
+void Renderer::drawRenderSettingsImGui()
 {
-    if (bEnabled) {
-        if (m_svgfManager == nullptr) {
+    ImGui::Text("Render Settings:");
+    if (ImGui::Checkbox("Use MSAA", &m_renderSettings.bMSAAEnabled)) {
+		// Don't allow MSAA to be used with SVGF
+        if(m_renderSettings.bMSAAEnabled && m_renderSettings.bSVGFEnabled) {
+            // Turn off SVGF
+            m_svgfManager = nullptr;
+            m_renderSettings.bSVGFEnabled = false;
+		}
+	}
+    if (ImGui::Checkbox("Use SVGF", &m_renderSettings.bSVGFEnabled)) {
+        if(m_renderSettings.bSVGFEnabled && m_svgfManager == nullptr) {
             m_svgfManager = std::make_unique<SVGFManager>();
             m_svgfManager->resize(m_extent.width, m_extent.height);
+            // Don't allow MSAA to be used with SVGF
+			m_renderSettings.bMSAAEnabled = false;
         }
-    }
-    else {
-        m_svgfManager = nullptr;
+        else if(!m_renderSettings.bSVGFEnabled) {
+            m_svgfManager = nullptr;
+		}
     }
 }
 
