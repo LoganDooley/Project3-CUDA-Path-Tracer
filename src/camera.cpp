@@ -69,6 +69,11 @@ void Camera::rotate(const glm::vec2& mouseDelta)
 	m_hasMoved = true;
 }
 
+void Camera::setScrollOffset(float offset)
+{
+	m_moveSpeed = std::max(0.1f, m_moveSpeed - offset * 0.2f);
+}
+
 glm::mat4 Camera::getViewProjectionMatrix(float width, float height) const
 {
 	glm::mat4 view = glm::lookAt(m_position, m_position + m_look, m_up);

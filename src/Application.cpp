@@ -69,6 +69,14 @@ Application::Application() {
 
 		});
 
+	glfwSetScrollCallback(m_window.GetGLFWwindow(), [](GLFWwindow* window, double xoffset, double yoffset) {
+		auto* app = static_cast<Application*>(glfwGetWindowUserPointer(window));
+		if (!app) {
+			return;
+		}
+		app->m_camera.setScrollOffset(static_cast<float>(yoffset));
+		});
+
 
 	InitVulkan();
 

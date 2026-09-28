@@ -33,4 +33,5 @@ struct InputState {
 	std::unordered_set<int> m_pressedKeys;
 	std::unordered_set<int> m_pressedMouseButtons;
 	glm::vec2 m_mousePosition = glm::vec2(0.0f);
+	glm::vec2 m_scrollOffset = glm::vec2(0.0f);
 };

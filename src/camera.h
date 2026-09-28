@@ -18,6 +18,7 @@ public:
 
 	void tick(float deltaTime, const InputState& inputState);
 	void rotate(const glm::vec2& mouseDelta);
+	void setScrollOffset(float offset);
 
 	glm::mat4 getViewProjectionMatrix(float width, float height) const;
 
