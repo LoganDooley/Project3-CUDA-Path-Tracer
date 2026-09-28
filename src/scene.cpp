@@ -9,6 +9,9 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include "tiny_gltf_v3.h"
 
+#define TINYOBJLOADER_IMPLEMENTATION
+#include "tiny_obj_loader.h"
+
 // STD Includes
 #include <stdexcept>
 #include <fstream>
@@ -112,6 +115,9 @@ std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath)
     else if(ext == ".gltf" || ext == ".glb") {
         return loadFromGltf(filepath);
     }
+    else if(ext == ".obj") {
+        return loadFromObj(filepath);
+	}
     else {
 		std::cerr << "Unsupported scene file format: " << ext << std::endl;
         return nullptr;
@@ -560,6 +566,195 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
 	}
 
     scene->m_geometryCount = geometry.size();
+	scene->m_materialCount = materials.size();
+	scene->m_triangleCount = sortedTriangles.size();
+	scene->m_blasNodeCount = blasNodes.size();
+
+    return scene;
+}
+
+std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
+{
+	tinyobj::ObjReaderConfig readerConfig;
+
+	std::filesystem::path path(filepath);
+	readerConfig.mtl_search_path = path.parent_path().string();
+    readerConfig.triangulate = true;
+
+	tinyobj::ObjReader reader;
+    if(!reader.ParseFromFile(filepath, readerConfig)) {
+        if(!reader.Error().empty()) {
+            std::cerr << "TinyObjReader: " << reader.Error() << std::endl;
+        }
+        return nullptr;
+	}
+
+    if(!reader.Warning().empty()) {
+        std::cerr << "TinyObjReader: " << reader.Warning() << std::endl;
+	}
+
+	auto& attrib = reader.GetAttrib();
+	auto& shapes = reader.GetShapes();
+	auto& objMaterials = reader.GetMaterials();
+
+    std::vector<Material> materials;
+    std::vector<Geom> geometry;
+    std::vector<Triangle> triangles;
+
+    // Parse materials from obj
+    for (const auto& objMaterial : objMaterials) {
+        Material mat{};
+		float emissiveSum = objMaterial.emission[0] + objMaterial.emission[1] + objMaterial.emission[2];
+        if(emissiveSum > 0.0f) {
+            mat.color = glm::vec3(objMaterial.emission[0], objMaterial.emission[1], objMaterial.emission[2]);
+            mat.emittance = 1.0f;
+        }
+        else {
+            mat.color = glm::vec3(objMaterial.diffuse[0], objMaterial.diffuse[1], objMaterial.diffuse[2]);
+            mat.emittance = 0.0f;
+		}
+
+        if (objMaterial.shininess > 100.0f || objMaterial.ior > 1.0f) {
+            mat.hasReflective = 1.0f;
+        }
+        else {
+            mat.specular.exponent = objMaterial.shininess;
+			mat.specular.color = glm::vec3(objMaterial.specular[0], objMaterial.specular[1], objMaterial.specular[2]);
+        }
+        materials.push_back(mat);
+    }
+
+    if (materials.empty()) {
+        materials.push_back(Material{});
+    }
+
+    // Parse meshes
+    for (const auto& shape : shapes) {
+        Geom geom{};
+        geom.type = GeomType::MESH;
+
+		geom.triangleOffset = triangles.size();
+        size_t indexOffset = 0;
+
+        // Iterate over polygons which should be triangles
+        for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
+			size_t fv = size_t(shape.mesh.num_face_vertices[f]);
+
+			Triangle tri{};
+			tinyobj::index_t idx0 = shape.mesh.indices[indexOffset + 0];
+            tri.v0 = glm::vec3(
+                attrib.vertices[3 * size_t(idx0.vertex_index) + 0],
+                attrib.vertices[3 * size_t(idx0.vertex_index) + 1],
+                attrib.vertices[3 * size_t(idx0.vertex_index) + 2]
+			);
+
+			tinyobj::index_t idx1 = shape.mesh.indices[indexOffset + 1];
+            tri.v1 = glm::vec3(
+                attrib.vertices[3 * size_t(idx1.vertex_index) + 0],
+                attrib.vertices[3 * size_t(idx1.vertex_index) + 1],
+                attrib.vertices[3 * size_t(idx1.vertex_index) + 2]
+            );
+
+			tinyobj::index_t idx2 = shape.mesh.indices[indexOffset + 2];
+            tri.v2 = glm::vec3(
+                attrib.vertices[3 * size_t(idx2.vertex_index) + 0],
+                attrib.vertices[3 * size_t(idx2.vertex_index) + 1],
+                attrib.vertices[3 * size_t(idx2.vertex_index) + 2]
+            );
+
+            triangles.push_back(tri);
+
+			int objMaterialId = shape.mesh.material_ids[f];
+			geom.materialid = (objMaterialId >= 0 && objMaterialId < materials.size()) ? objMaterialId : 0;
+
+			indexOffset += fv;
+        }
+
+		geom.triangleCount = triangles.size() - geom.triangleOffset;
+
+		geom.transform = glm::mat4(1.0f);
+		geom.inverseTransform = glm::mat4(1.0f);
+		geom.invTranspose = glm::mat4(1.0f);
+
+        if (geom.triangleCount > 0) {
+            geometry.push_back(geom);
+        }
+    }
+
+    // Build BLAS
+	std::vector<BLASNode> blasNodes;
+	std::vector<Triangle> sortedTriangles;
+
+    for (size_t g = 0; g < geometry.size(); g++) {
+		Geom& geom = geometry[g];
+		std::vector<TriangleBVHBuildData> triangleBuildData(geom.triangleCount);
+        for (int t = 0; t < geom.triangleCount; t++) {
+            const Triangle& tri = triangles[geom.triangleOffset + t];
+            AABB bounds = AABB::fromTriangle(tri);
+			triangleBuildData[t].bounds = bounds;
+            triangleBuildData[t].centroid = (tri.v0 + tri.v1 + tri.v2) / 3.0f;
+			triangleBuildData[t].triangleIndex = geom.triangleOffset + t;
+        }
+
+        std::vector<BLASNode> geomBlasNodes;
+		BVHBuilder::buildBLAS(triangleBuildData, 0, triangleBuildData.size(), geomBlasNodes, triangles, sortedTriangles);
+        int nodeOffsetStart = blasNodes.size();
+        for (size_t n = 0; n < geomBlasNodes.size(); n++) {
+            BLASNode& node = geomBlasNodes[n];
+            if (node.triangleCount == 0) {
+                node.leftChild += nodeOffsetStart;
+            }
+        }
+        geom.blasNodeOffset = nodeOffsetStart;
+		blasNodes.insert(blasNodes.end(), geomBlasNodes.begin(), geomBlasNodes.end());
+    }
+
+	std::unique_ptr<Scene> scene = std::make_unique<Scene>();
+    
+    // Sort lights
+    auto it = std::partition(geometry.begin(), geometry.end(), [materials](const Geom& geom) {
+        return geom.materialid < materials.size() && geom.materialid >= 0 && materials[geom.materialid].emittance > 0.0f;
+		});
+	scene->m_lightCount = std::distance(geometry.begin(), it);
+
+    // Copy to GPU
+    if (!geometry.empty()) {
+        if (cudaMalloc((void**)&scene->dev_geometry, geometry.size() * sizeof(Geom)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_geometry");
+        }
+        if (cudaMemcpy(scene->dev_geometry, geometry.data(), geometry.size() * sizeof(Geom), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy geometry to dev_geometry");
+        }
+	}
+
+    if(!materials.empty()) {
+        if (cudaMalloc((void**)&scene->dev_materials, materials.size() * sizeof(Material)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_materials");
+        }
+        if (cudaMemcpy(scene->dev_materials, materials.data(), materials.size() * sizeof(Material), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy materials to dev_materials");
+        }
+	}
+
+    if (!sortedTriangles.empty()) {
+        if (cudaMalloc((void**)&scene->dev_triangles, sortedTriangles.size() * sizeof(Triangle)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_triangles");
+        }
+        if (cudaMemcpy(scene->dev_triangles, sortedTriangles.data(), sortedTriangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy triangles to dev_triangles");
+        }
+    }
+
+    if (!blasNodes.empty()) {
+        if (cudaMalloc((void**)&scene->dev_blasNodes, blasNodes.size() * sizeof(BLASNode)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_blasNodes");
+        }
+        if (cudaMemcpy(scene->dev_blasNodes, blasNodes.data(), blasNodes.size() * sizeof(BLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy BLAS nodes to dev_blasNodes");
+        }
+    }
+
+	scene->m_geometryCount = geometry.size();
 	scene->m_materialCount = materials.size();
 	scene->m_triangleCount = sortedTriangles.size();
 	scene->m_blasNodeCount = blasNodes.size();

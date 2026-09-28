@@ -56,4 +56,5 @@ public:
 private:
 	static std::unique_ptr<Scene> loadFromJson(const std::string& filepath);
 	static std::unique_ptr<Scene> loadFromGltf(const std::string& filepath);
+	static std::unique_ptr<Scene> loadFromObj(const std::string& filepath);
 };

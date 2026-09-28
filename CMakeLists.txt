@@ -57,6 +57,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 	external/imgui/
 	external/imgui/backends
 	external/tinygltf/
+	external/tinyobjloader/
 	${CUDAToolkit_INCLUDE_DIRS}
 )
 
