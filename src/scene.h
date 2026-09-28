@@ -3,6 +3,7 @@
 #include "pathTraceCommon.h"
 
 #include "devScene.h"
+#include "bvh.h"
 
 #include <string>
 #include <memory>
@@ -24,6 +25,8 @@ public:
 			m_geometryCount,
 			dev_triangles,
 			m_triangleCount,
+			dev_blasNodes,
+			m_blasNodeCount,
 			dev_materials,
 			m_materialCount,
 			m_lightCount
@@ -35,6 +38,9 @@ public:
 
 	Triangle* dev_triangles = nullptr;
 	size_t m_triangleCount = 0;
+
+	BLASNode* dev_blasNodes = nullptr;
+	size_t m_blasNodeCount = 0;
 
 	Material* dev_materials = nullptr;
 	size_t m_materialCount = 0;

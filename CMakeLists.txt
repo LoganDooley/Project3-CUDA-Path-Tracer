@@ -64,6 +64,7 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
 	GLFW_INCLUDE_VULKAN 
 	GLM_FORCE_PURE
 	$<$<CONFIG:Debug>:-G> 
+	NOMINMAX 
 )
 
 target_link_libraries(${CMAKE_PROJECT_NAME} 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pathTraceCommon.h"
+#include "intersection.h"
 
 #include "material.h"
 
@@ -15,8 +16,12 @@ struct DevScene {
 
 	Geom* dev_geometry = nullptr;
 	size_t m_geometryCount = 0;
+
 	Triangle* dev_triangles = nullptr;
 	size_t m_triangleCount = 0;
+
+	BLASNode* dev_blasNodes = nullptr;
+	size_t m_blasNodeCount = 0;
 
 	Material* dev_materials = nullptr;
 	size_t m_materialCount = 0;

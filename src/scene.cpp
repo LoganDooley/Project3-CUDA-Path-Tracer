@@ -41,6 +41,16 @@ Scene::~Scene()
         cudaFree(dev_materials);
         dev_materials = nullptr;
     }
+
+    if (dev_triangles) {
+        cudaFree(dev_triangles);
+        dev_triangles = nullptr;
+    }
+
+    if (dev_blasNodes) {
+        cudaFree(dev_blasNodes);
+        dev_blasNodes = nullptr;
+    }
 }
 
 Scene& Scene::operator=(Scene&& other) noexcept
@@ -52,12 +62,22 @@ Scene& Scene::operator=(Scene&& other) noexcept
         if (dev_materials) {
             cudaFree(dev_materials);
         }
+        if (dev_triangles) {
+            cudaFree(dev_triangles);
+        }
+        if (dev_blasNodes) {
+            cudaFree(dev_blasNodes);
+        }
 
         dev_geometry = other.dev_geometry;
         dev_materials = other.dev_materials;
+        dev_triangles = other.dev_triangles;
+		dev_blasNodes = other.dev_blasNodes;
 
         other.dev_geometry = nullptr;
         other.dev_materials = nullptr;
+		other.dev_triangles = nullptr;
+        other.dev_blasNodes = nullptr;
     }
 
     return *this;
@@ -65,10 +85,18 @@ Scene& Scene::operator=(Scene&& other) noexcept
 
 Scene::Scene(Scene&& other) noexcept :
     dev_geometry(other.dev_geometry),
-    dev_materials(other.dev_materials)
+    m_geometryCount(other.m_geometryCount),
+    dev_materials(other.dev_materials),
+    m_materialCount(other.m_materialCount),
+    dev_triangles(other.dev_triangles),
+    m_triangleCount(other.m_triangleCount),
+    dev_blasNodes(other.dev_blasNodes),
+    m_blasNodeCount(other.m_blasNodeCount)
 {
     other.dev_geometry = nullptr;
     other.dev_materials = nullptr;
+    other.dev_triangles = nullptr;
+    other.dev_blasNodes = nullptr;
 }
 
 std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath)
@@ -423,30 +451,64 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
         return nullptr;
     }
 
-	std::cout << "Finished parsing glTF file: " << filepath << std::endl;
-
     std::vector<Material> materials;
 	std::vector<Geom> geometry;
 	std::vector<Triangle> triangles;
 
 	parseGltfMaterials(model, materials);
 
-	std::cout << " Finished parsing materials: " << materials.size() << std::endl;
-
     // Parse geometry from default scene
+
+    constexpr float kImportScale = 1.0f;
+    glm::mat4 rootTransform = glm::scale(glm::mat4(1.0f), glm::vec3(kImportScale));
+
 	uint32_t activeSceneIdx = (model.default_scene >= 0 && model.default_scene < model.scenes_count) ? model.default_scene : 0;
     if(activeSceneIdx < model.scenes_count) {
         const tg3_scene& scene = model.scenes[activeSceneIdx];
         for (uint32_t i = 0; i < scene.nodes_count; ++i) {
-            parseGltfNodeRecursive(model, scene.nodes[i], glm::mat4(1.0f), geometry, triangles);
+            parseGltfNodeRecursive(model, scene.nodes[i], rootTransform, geometry, triangles);
         }
 	}
-
-	std::cout << " Finished parsing geometry: " << geometry.size() << " and triangles: " << triangles.size() << std::endl;
 
     // Done with parsing
     tg3_model_free(&model);
     tg3_error_stack_free(&errors);
+
+    // Build BLAS
+    std::vector<BLASNode> blasNodes;
+    std::vector<Triangle> sortedTriangles;
+
+    for (size_t g = 0; g < geometry.size(); g++) {
+        Geom& geom = geometry[g];
+
+        if (geom.type != GeomType::MESH || geom.triangleCount <= 0) {
+            continue;
+        }
+
+        std::vector<TriangleBVHBuildData> triangleBuildData(geom.triangleCount);
+        for(int t = 0; t < geom.triangleCount; t++) {
+            const Triangle& tri = triangles[geom.triangleOffset + t];
+            AABB bounds = AABB::fromTriangle(tri);
+			triangleBuildData[t].bounds = bounds;
+			triangleBuildData[t].centroid = (tri.v0 + tri.v1 + tri.v2) / 3.0f;
+            triangleBuildData[t].triangleIndex = geom.triangleOffset + t;
+		}
+
+		std::vector<BLASNode> geomBlasNodes;
+        BVHBuilder::buildBLAS(triangleBuildData, 0, triangleBuildData.size(), geomBlasNodes, triangles, sortedTriangles);
+
+        int nodeOffsetStart = blasNodes.size();
+        for(size_t n = 0; n < geomBlasNodes.size(); n++) {
+            BLASNode& node = geomBlasNodes[n];
+            if(node.triangleCount == 0) {
+                node.leftChild += nodeOffsetStart;
+            }
+		}
+
+        geom.blasNodeOffset = nodeOffsetStart;
+
+		blasNodes.insert(blasNodes.end(), geomBlasNodes.begin(), geomBlasNodes.end());
+    }
 
 	std::unique_ptr<Scene> scene = std::make_unique<Scene>();
 
@@ -455,8 +517,6 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
         return geom.materialid < materials.size() && geom.materialid >= 0 && materials[geom.materialid].emittance > 0.0f;
         });
     scene->m_lightCount = std::distance(geometry.begin(), it);
-
-	std::cout << " Finished sorting geometry, light count: " << scene->m_lightCount << std::endl;
 
     // Allocate geometry
     if (!geometry.empty()) {
@@ -469,8 +529,6 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
         }
     }
 
-	std::cout << " Finished allocating geometry" << std::endl;
-
     // Allocate materials
     if(!materials.empty()) {
         if (cudaMalloc((void**)&scene->dev_materials, materials.size() * sizeof(Material)) != cudaSuccess) {
@@ -481,23 +539,30 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
 		}
 	}
 
-	std::cout << " Finished allocating materials" << std::endl;
-
     // Allocate triangles
     if (!triangles.empty()) {
-        if (cudaMalloc((void**)&scene->dev_triangles, triangles.size() * sizeof(Triangle)) != cudaSuccess) {
+        if (cudaMalloc((void**)&scene->dev_triangles, sortedTriangles.size() * sizeof(Triangle)) != cudaSuccess) {
             throw std::runtime_error("CUDA Failed to allocate dev_triangles");
         }
-        if(cudaMemcpy(scene->dev_triangles, triangles.data(), triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice) != cudaSuccess) {
+        if(cudaMemcpy(scene->dev_triangles, sortedTriangles.data(), sortedTriangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice) != cudaSuccess) {
             throw std::runtime_error("CUDA Failed to memcopy triangles to dev_triangles");
 		}
     }
 
-	std::cout << " Finished allocating triangles" << std::endl;
+	// Allocate BLAS nodes
+    if (!blasNodes.empty()) {
+        if (cudaMalloc((void**)&scene->dev_blasNodes, blasNodes.size() * sizeof(BLASNode)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_blasNodes");
+        }
+        if (cudaMemcpy(scene->dev_blasNodes, blasNodes.data(), blasNodes.size() * sizeof(BLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy BLAS nodes to dev_blasNodes");
+        }
+	}
 
     scene->m_geometryCount = geometry.size();
 	scene->m_materialCount = materials.size();
-	scene->m_triangleCount = triangles.size();
+	scene->m_triangleCount = sortedTriangles.size();
+	scene->m_blasNodeCount = blasNodes.size();
 
     return scene;
 }

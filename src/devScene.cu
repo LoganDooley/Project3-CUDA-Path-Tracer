@@ -6,7 +6,7 @@
 __device__ IntersectionData DevScene::intersect(const Ray& ray) {
     IntersectionData closestIntersection = IntersectionData{};
     for (int i = 0; i < m_geometryCount; i++) {
-        IntersectionData intersection = IntersectionStatics::intersectGeometry(ray, dev_geometry[i], dev_triangles);
+        IntersectionData intersection = IntersectionStatics::intersectGeometry(ray, dev_geometry[i], dev_blasNodes, dev_triangles);
         if (intersection.t > 0.0f) {
             if (closestIntersection.t < 0.0f || intersection.t < closestIntersection.t) {
                 closestIntersection = intersection;
@@ -56,7 +56,7 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
 
     glm::vec3 lightNormal = glm::vec3(0.0f);
     float lightSurfacePdf = 1.0f;
-    glm::vec3 lightPosition = Samplers::sampleGeometry(lightGeometry, glm::vec3(random), lightNormal, lightSurfacePdf);
+    glm::vec3 lightPosition = Samplers::sampleGeometry(lightGeometry, dev_triangles, glm::vec3(random), lightNormal, lightSurfacePdf);
 
     if (lightSurfacePdf <= 0.0f) {
         return glm::vec3(0.0f);
