@@ -12,7 +12,7 @@ struct DevScene {
 
 	__device__ glm::vec3 nextEventEsimation(const glm::vec4& random, const Ray& incomingRay, const IntersectionData& intersectionData, float& outPdf);
 
-	__device__ float getLightPdf(int lightIndex, const glm::vec3& worldPosition, const glm::vec3& normal);
+	__device__ float getLightPdf(int lightIndex, const glm::vec3& worldPosition, const glm::vec3& normal, float hitTriangleLocalSurfaceArea);
 
 	Geom* dev_geometry = nullptr;
 	size_t m_geometryCount = 0;

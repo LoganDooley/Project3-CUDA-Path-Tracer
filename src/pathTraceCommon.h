@@ -47,5 +47,4 @@ struct Geom
 	int blasNodeOffset = 0;
 	int triangleOffset = 0;
 	int triangleCount = 0;
-	float surfaceArea = 0.0f; // Incorrect method for MIS temporarily
 };

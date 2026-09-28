@@ -12,6 +12,7 @@ struct IntersectionData {
 	int geometryIndex = -1;
 	int materialIndex = 0;
 	bool bInside = false;
+	float hitTriangleLocalSurfaceArea = 0.0f;
 };
 
 class IntersectionStatics {
@@ -171,7 +172,10 @@ private:
 		float t = f * glm::dot(edge2, q);
 		if (t > EPSILON) {
 			result.t = t;
-			result.normal = MathHelpers::safeNormalize(glm::cross(edge1, edge2));
+			glm::vec3 cross = glm::cross(edge1, edge2);
+			float crossMagnitude = glm::length(cross);
+			result.hitTriangleLocalSurfaceArea = 0.5f * crossMagnitude;
+			result.normal = MathHelpers::safeNormalize(cross);
 			result.bInside = glm::dot(result.normal, ray.direction) > 0.0f;
 		}
 

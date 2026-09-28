@@ -360,15 +360,6 @@ void parseGltfNodeRecursive(
                 }
             }
 
-            // Get surface area (bad method for MIS temporarily)
-			float surfaceArea = 0.0f;
-            for(int t = startTriangleOffset; t < startTriangleOffset + primitiveTriangleCount; t++) {
-                const Triangle& tri = outTriangles[t];
-                glm::vec3 edge1 = tri.v1 - tri.v0;
-                glm::vec3 edge2 = tri.v2 - tri.v0;
-                surfaceArea += 0.5f * glm::length(glm::cross(edge1, edge2));
-			}
-
             Geom geom{};
             geom.type = GeomType::MESH;
 
@@ -381,7 +372,6 @@ void parseGltfNodeRecursive(
 
 			geom.triangleOffset = startTriangleOffset;
             geom.triangleCount = primitiveTriangleCount;
-			geom.surfaceArea = surfaceArea;
 
             outGeometries.push_back(geom);
         }

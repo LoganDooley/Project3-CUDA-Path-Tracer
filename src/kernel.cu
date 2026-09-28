@@ -220,7 +220,7 @@ __global__ void kernShade(
     // Handle hitting a light
     if (material.emittance > 0.0f) {
         // What are the chances that this would be hit by sampling the lights previously 
-        float lightPdf = dev_scene.getLightPdf(intersectionData.geometryIndex, pathState.ray.getPositionAtTime(intersectionData.t), intersectionData.normal);
+        float lightPdf = dev_scene.getLightPdf(intersectionData.geometryIndex, pathState.ray.getPositionAtTime(intersectionData.t), intersectionData.normal, intersectionData.hitTriangleLocalSurfaceArea);
 
 		const float epsilon = 0.0001f;
         float distance = intersectionData.t;

@@ -98,7 +98,7 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
     return (brdf * emission) / outPdf;
 }
 
-__device__ float DevScene::getLightPdf(int lightIndex, const glm::vec3& worldPosition, const glm::vec3& worldNormal)
+__device__ float DevScene::getLightPdf(int lightIndex, const glm::vec3& worldPosition, const glm::vec3& worldNormal, float hitTriangleLocalSurfaceArea)
 {
     if(lightIndex < 0 || lightIndex >= m_lightCount) {
         return 0.0f;
@@ -138,10 +138,10 @@ __device__ float DevScene::getLightPdf(int lightIndex, const glm::vec3& worldPos
         }
     }
     else if (lightGeometry.type == GeomType::MESH) {
-        if(lightGeometry.surfaceArea <= 0.0f) {
+        if(hitTriangleLocalSurfaceArea <= 0.0f) {
             return 0.0f;
 		}
-        localPdf = 1.0f / lightGeometry.surfaceArea;
+        localPdf = 1.0f / (lightGeometry.triangleCount * hitTriangleLocalSurfaceArea);
         localNormal = glm::transpose(transform3) * worldNormal;
         localNormal = glm::normalize(localNormal);
     }
