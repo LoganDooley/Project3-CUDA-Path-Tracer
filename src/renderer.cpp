@@ -124,6 +124,10 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             m_svgfManager->captureGBuffer(dev_pathStates, dev_intersectionData, currentActivePathCount, camera, scene);
         }
 
+        if (m_renderSettings.bSortPathsByMaterial) {
+            sortPathsByMaterial(dev_pathStates, dev_intersectionData, currentActivePathCount, scene->dev_materials);
+        }
+
         launchShadeKernel(dev_pathStates,
             dev_intersectionData,
             scene,
@@ -231,7 +235,7 @@ void Renderer::drawRenderSettingsImGui(Camera& camera)
             m_renderSettings.bSVGFEnabled = false;
 		}
 	}
-    if (ImGui::Checkbox("Use SVGF", &m_renderSettings.bSVGFEnabled)) {
+    if (ImGui::Checkbox("Use SVGF:", &m_renderSettings.bSVGFEnabled)) {
         if(m_renderSettings.bSVGFEnabled && m_svgfManager == nullptr) {
             m_svgfManager = std::make_unique<SVGFManager>();
             m_svgfManager->resize(m_extent.width, m_extent.height);
@@ -245,6 +249,8 @@ void Renderer::drawRenderSettingsImGui(Camera& camera)
             m_svgfManager = nullptr;
 		}
     }
+    ImGui::Checkbox("Use Stream Compaction:", &m_renderSettings.bStreamCompactionEnabled);
+	ImGui::Checkbox("Sort Paths by Material:", &m_renderSettings.bSortPathsByMaterial);
     ImGui::Text("Camera Settings:");
     ImGui::BeginDisabled(m_renderSettings.bSVGFEnabled);
     if (ImGui::SliderFloat("Lens Radius", &camera.m_lensRadius, 0.0f, 0.25f)) {

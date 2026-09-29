@@ -522,3 +522,49 @@ int runStreamCompaction(PathState* dev_pathStates, IntersectionData* dev_interse
 
     return zip_new_end - zip_start;
 }
+
+
+struct GetMaterialType {
+    const Material* dev_materials;
+
+    GetMaterialType(const Material* materials) : dev_materials(materials) {}
+
+    __device__ uint8_t operator()(const IntersectionData& intersection) const {
+        if (intersection.t <= 0.0f || dev_materials == nullptr) {
+            return 0;
+        }
+
+        const Material& material = dev_materials[intersection.materialIndex];
+
+        if (material.isSpecular()) {
+            return 1;
+        }
+
+        if (material.isGlossy()) {
+            return 2;
+        }
+
+        return 3;
+    }
+};
+
+void sortPathsByMaterial(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int activePathCount, const Material* dev_materials)
+{
+    thrust::device_ptr<PathState> thrust_pathStates(dev_pathStates);
+    thrust::device_ptr<IntersectionData> thrust_intersectionData(dev_intersectionData);
+
+    uint8_t* dev_materialTypes;
+    if (cudaMalloc((void**)&dev_materialTypes, activePathCount * sizeof(uint8_t)) != cudaSuccess) {
+        return;
+    }
+
+    thrust::device_ptr<uint8_t> thrust_materialTypes(dev_materialTypes);
+
+    GetMaterialType transformFunction(dev_materials);
+
+    thrust::transform(thrust_intersectionData, thrust_intersectionData + activePathCount, thrust_materialTypes, transformFunction);
+
+    auto zip_values = thrust::make_zip_iterator(thrust::make_tuple(thrust_pathStates, thrust_intersectionData));
+    thrust::sort_by_key(thrust_materialTypes, thrust_materialTypes + activePathCount, zip_values);
+    cudaFree(dev_materialTypes);
+}
