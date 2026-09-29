@@ -9,8 +9,8 @@
 class Samplers {
 public:
 	__host__ __device__ static glm::vec2 sampleUniformDiskConcentric(const glm::vec2& random) {
-		glm::vec2 uOffset = 2 * random.x - glm::vec2(1.0f);
-		if (uOffset.x == 0 && uOffset.y == 0) {
+		glm::vec2 uOffset = 2.0f * random - glm::vec2(1.f);
+		if (uOffset.x == 0.0f && uOffset.y == 0.0f) {
 			return glm::vec2(0.0f);
 		}
 
@@ -24,7 +24,6 @@ public:
 			r = uOffset.y;
 			theta = (glm::pi<float>() / 2.0f) - (glm::pi<float>() / 4.0f) * (uOffset.x / uOffset.y);
 		}
-
 		return r * glm::vec2(glm::cos(theta), glm::sin(theta));
 	}
 
