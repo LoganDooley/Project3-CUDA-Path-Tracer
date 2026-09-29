@@ -28,7 +28,7 @@ public:
 
 	void saveCurrentRenderToFile(const std::string& filepath);
 
-	void drawRenderSettingsImGui();
+	void drawRenderSettingsImGui(Camera& camera);
 
 private:
 	void cleanup();

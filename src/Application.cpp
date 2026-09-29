@@ -175,10 +175,10 @@ void Application::run() {
 		m_camera.tick(deltaTime, m_inputState);
 
 		// Render scene
-		m_renderer.render(m_currentScene, m_currentEnvironmentMap, m_camera, m_camera.m_hasMoved);
+		m_renderer.render(m_currentScene, m_currentEnvironmentMap, m_camera, m_camera.m_hasChanged);
 
 		// Clear camera has moved
-		m_camera.m_hasMoved = false;
+		m_camera.m_hasChanged = false;
 
 		currentCommandBuffer.reset();
 		currentCommandBuffer.begin(vk::CommandBufferBeginInfo{});
@@ -726,7 +726,7 @@ void Application::renderImGui()
 	if (ImGui::Button("Save Render to File")) {
 		saveCurrentRender();
 	}
-	m_renderer.drawRenderSettingsImGui();
+	m_renderer.drawRenderSettingsImGui(m_camera);
 	ImGui::Text("Performance Stats:");
 	ImGui::Text("FPS: %.1f", currentFps);
 	ImGui::Text("Frame Time: %.2f ms", currentFrameTimeMs);
@@ -765,7 +765,7 @@ void Application::pickSceneFile()
 	std::string sceneFilePath = outPath.get();
 
 	m_currentScene = SceneLoader::loadFromFile(sceneFilePath);
-	m_camera.m_hasMoved = true;
+	m_camera.m_hasChanged = true;
 }
 
 void Application::saveCurrentRender()
@@ -815,11 +815,11 @@ void Application::pickEnvironmentMap()
 	}
 
 	m_currentEnvironmentMap = std::make_unique<EnvironmentMap>(imageData, width, height);
-	m_camera.m_hasMoved = true;
+	m_camera.m_hasChanged = true;
 }
 
 void Application::clearEnvironmentMap()
 {
 	m_currentEnvironmentMap = nullptr;
-	m_camera.m_hasMoved = true;
+	m_camera.m_hasChanged = true;
 }

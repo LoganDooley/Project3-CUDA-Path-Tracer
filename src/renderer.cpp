@@ -220,7 +220,7 @@ void Renderer::saveCurrentRenderToFile(const std::string& filepath)
     stbi_write_png(filepath.c_str(), m_extent.width, m_extent.height, 3, outputImage.data(), m_extent.width * 3);
 }
 
-void Renderer::drawRenderSettingsImGui()
+void Renderer::drawRenderSettingsImGui(Camera& camera)
 {
     ImGui::Text("Render Settings:");
     if (ImGui::Checkbox("Use MSAA", &m_renderSettings.bMSAAEnabled)) {
@@ -237,11 +237,23 @@ void Renderer::drawRenderSettingsImGui()
             m_svgfManager->resize(m_extent.width, m_extent.height);
             // Don't allow MSAA to be used with SVGF
 			m_renderSettings.bMSAAEnabled = false;
+            // Reset lens radius to 0 to disable DOF
+            camera.m_lensRadius = 0.0f;
+            camera.m_hasChanged = true;
         }
         else if(!m_renderSettings.bSVGFEnabled) {
             m_svgfManager = nullptr;
 		}
     }
+    ImGui::Text("Camera Settings:");
+    ImGui::BeginDisabled(m_renderSettings.bSVGFEnabled);
+    if (ImGui::SliderFloat("Lens Radius", &camera.m_lensRadius, 0.0f, 0.25f)) {
+        camera.m_hasChanged = true;
+    }
+    if (ImGui::SliderFloat("Focal Distance", &camera.m_focalDistance, 0.2, 100.f)) {
+        camera.m_hasChanged = true;
+    }
+    ImGui::EndDisabled();
 }
 
 void Renderer::cleanup()

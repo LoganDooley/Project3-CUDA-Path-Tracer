@@ -99,8 +99,8 @@ __device__ void applyCameraDepthOfField(Ray& ray,
     glm::vec3& cameraLook,
     glm::vec3& cameraRight,
     glm::vec3& cameraUp,
-    float lensRadius, 
-    float focalDistance) {
+    float focalDistance, 
+    float lensRadius) {
     glm::vec2 pLens = lensRadius * Samplers::sampleUniformDiskConcentric(random);
 
     float ft = focalDistance / glm::dot(ray.direction, cameraLook);
@@ -123,7 +123,9 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates,
     glm::vec3 cameraUp, 
     float fovY, 
     int frameIndex,
-    bool bMSAAEnabled)
+    bool bMSAAEnabled,
+    float focalDistance,
+    float lensRadius)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -169,7 +171,9 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates,
     pathState.bounceCount = 0;
     pathState.active = true;
 
-    applyCameraDepthOfField(pathState.ray, glm::vec2(u01(rng), u01(rng)), cameraLook, cameraRight, cameraUp, 0.04, 2.0);
+    if (lensRadius > 0.001f) {
+        applyCameraDepthOfField(pathState.ray, glm::vec2(u01(rng), u01(rng)), cameraLook, cameraRight, cameraUp, focalDistance, lensRadius);
+    }
 
     dev_pathStates[pixelIndex] = pathState;
 }
@@ -415,7 +419,8 @@ void launchCameraRayGenKernel(
         dev_pathStates, width, height,
         camera.m_position, camera.m_look, camera.m_right, camera.m_up, camera.m_fovy, 
         frameIndex,
-        bMSAAEnabled);
+        bMSAAEnabled,
+        camera.m_focalDistance, camera.m_lensRadius);
 }
 
 void launchIntersectKernel(PathState* dev_pathStates, IntersectionData* dev_intersectionData, const std::unique_ptr<Scene>& scene, int activePathCount)

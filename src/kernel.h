@@ -19,7 +19,9 @@ __global__ void kernGenerateCameraRays(
 	glm::vec3 cameraUp,
 	float fovY,
 	int frameIndex,
-	bool bMSAAEnabled);
+	bool bMSAAEnabled,
+	float focalDistance,
+	float lensRadius);
 
 __global__ void kernIntersect(
 	PathState* dev_pathStates,

@@ -40,7 +40,7 @@ void Camera::tick(float deltaTime, const InputState& inputState)
 
 	if (moveDirection != glm::vec3(0.0f)) {
 		m_position += m_moveSpeed * deltaTime * moveDirection;
-		m_hasMoved = true;
+		m_hasChanged = true;
 	}
 }
 
@@ -66,7 +66,7 @@ void Camera::rotate(const glm::vec2& mouseDelta)
 	m_right = glm::normalize(glm::cross(m_look, globalUp));
 	m_up = glm::normalize(glm::cross(m_right, m_look));
 
-	m_hasMoved = true;
+	m_hasChanged = true;
 }
 
 void Camera::setScrollOffset(float offset)
