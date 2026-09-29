@@ -94,6 +94,26 @@ __device__ glm::vec3 sampleEnvironmentMap(cudaTextureObject_t environmentMap, co
     return glm::vec3(sampled.x, sampled.y, sampled.z);
 }
 
+__device__ void applyCameraDepthOfField(Ray& ray, 
+    const glm::vec2& random, 
+    glm::vec3& cameraLook,
+    glm::vec3& cameraRight,
+    glm::vec3& cameraUp,
+    float lensRadius, 
+    float focalDistance) {
+    glm::vec2 pLens = lensRadius * Samplers::sampleUniformDiskConcentric(random);
+
+    float ft = focalDistance / glm::dot(ray.direction, cameraLook);
+    glm::vec3 pFocus = ray.getPositionAtTime(ft);
+
+    glm::vec3 worldLensOrigin = ray.origin + 
+        cameraRight * pLens.x + 
+        cameraUp * pLens.y;
+
+    ray.origin = worldLensOrigin;
+    ray.direction = glm::normalize(pFocus - ray.origin);
+}
+
 __global__ void kernGenerateCameraRays(PathState* dev_pathStates, 
     int width, 
     int height, 
@@ -119,10 +139,11 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates,
     float jitterX = 0.0f;
     float jitterY = 0.0f;
 
+    thrust::default_random_engine rng = makeSeededRandomEngine(frameIndex, pixelIndex, 0);
+    thrust::uniform_real_distribution<float> u01(0, 1);
+
     if (bMSAAEnabled) {
         // Add antialiasing by jittering the ray
-        thrust::default_random_engine rng = makeSeededRandomEngine(frameIndex, pixelIndex, 0);
-        thrust::uniform_real_distribution<float> u01(0, 1);
         jitterX = u01(rng) - 0.5f;
 		jitterY = u01(rng) - 0.5f;
     }
@@ -147,6 +168,8 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates,
     pathState.accumulatedColor = glm::vec3(0.0f);
     pathState.bounceCount = 0;
     pathState.active = true;
+
+    applyCameraDepthOfField(pathState.ray, glm::vec2(u01(rng), u01(rng)), cameraLook, cameraRight, cameraUp, 0.04, 2.0);
 
     dev_pathStates[pixelIndex] = pathState;
 }
