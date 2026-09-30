@@ -23,6 +23,9 @@ struct DevScene {
 	BLASNode* dev_blasNodes = nullptr;
 	size_t m_blasNodeCount = 0;
 
+	TLASNode* dev_tlasNodes = nullptr;
+	size_t m_tlasNodeCount = 0;
+
 	Material* dev_materials = nullptr;
 	size_t m_materialCount = 0;
 

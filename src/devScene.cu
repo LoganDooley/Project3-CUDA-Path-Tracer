@@ -3,19 +3,68 @@
 #include "material.h"
 #include "samplers.h"
 
+#define USE_TLAS 1
+
 __device__ IntersectionData DevScene::intersect(const Ray& ray) {
-    IntersectionData closestIntersection = IntersectionData{};
-    for (int i = 0; i < m_geometryCount; i++) {
-        IntersectionData intersection = IntersectionStatics::intersectGeometry(ray, dev_geometry[i], dev_blasNodes, dev_triangles);
-        if (intersection.t > 0.0f) {
-            if (closestIntersection.t < 0.0f || intersection.t < closestIntersection.t) {
-                closestIntersection = intersection;
-                closestIntersection.geometryIndex = i;
+    IntersectionData result = IntersectionData{};
+
+#if USE_TLAS
+    int nodeStack[32];
+    int stackPtr = 0;
+
+    nodeStack[stackPtr++] = 0; // tlas node index 0 is always the root
+
+    while (stackPtr > 0) {
+        // Pop node off stack
+        int nodeIndex = nodeStack[--stackPtr];
+        const TLASNode& node = dev_tlasNodes[nodeIndex];
+
+        float tNear;
+        if (!node.intersect(ray, tNear)) {
+            // Missed this node, skip it
+            continue;
+        }
+
+        if (result.t > 0.0f && tNear > result.t) {
+            // We already have a closer intersection, skip this node
+            continue;
+        }
+
+        if (node.leftChild == -1) {
+            // Hit leaf node, check geometry
+			int geomIndex = node.geometryIndex;
+            if (geomIndex < 0 || geomIndex >= m_geometryCount) {
+                continue;
+            }
+
+			Geom geometry = dev_geometry[geomIndex];
+			IntersectionData geometryResult = IntersectionStatics::intersectGeometry(ray, geometry, dev_blasNodes, dev_triangles);
+            if(geometryResult.t > 0.0f && (result.t < 0.0f || geometryResult.t < result.t)) {
+                result = geometryResult;
+                result.geometryIndex = geomIndex;
+			}
+        }
+        else {
+            // Push children onto stack if there is room
+            if (stackPtr + 2 < 32) {
+                nodeStack[stackPtr++] = node.leftChild;
+                nodeStack[stackPtr++] = node.leftChild + 1;
             }
         }
     }
+#else
+    for (int i = 0; i < m_geometryCount; i++) {
+        IntersectionData intersection = IntersectionStatics::intersectGeometry(ray, dev_geometry[i], dev_blasNodes, dev_triangles);
+        if (intersection.t > 0.0f) {
+            if (result.t < 0.0f || intersection.t < result.t) {
+                result = intersection;
+                result.geometryIndex = i;
+            }
+        }
+    }
+#endif
 
-    return closestIntersection;
+    return result;
 }
 
 __device__ bool DevScene::isVisible(const Ray& ray, float tMax)

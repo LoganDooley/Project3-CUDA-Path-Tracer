@@ -27,6 +27,8 @@ public:
 			m_triangleCount,
 			dev_blasNodes,
 			m_blasNodeCount,
+			dev_tlasNodes,
+			m_tlasNodeCount,
 			dev_materials,
 			m_materialCount,
 			m_lightCount
@@ -41,6 +43,9 @@ public:
 
 	BLASNode* dev_blasNodes = nullptr;
 	size_t m_blasNodeCount = 0;
+
+	TLASNode* dev_tlasNodes = nullptr;
+	size_t m_tlasNodeCount = 0;
 
 	Material* dev_materials = nullptr;
 	size_t m_materialCount = 0;

@@ -126,6 +126,8 @@ std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath)
 
 std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath)
 {
+    std::unique_ptr<Scene> scene = std::make_unique<Scene>();
+
     std::ifstream file(filepath);
     if (!file.is_open()) {
         throw std::runtime_error("Failed to open scene file: " + filepath);
@@ -212,38 +214,60 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath)
         }
     }
 
-    std::unique_ptr<Scene> scene = std::make_unique<Scene>();
-
-    // Sort geometry so lights are in the front
-    auto it = std::partition(geometry.begin(), geometry.end(), [materials](const Geom& geometry) {
-        return geometry.materialid < materials.size() && geometry.materialid >= 0 && materials[geometry.materialid].emittance > 0.0f;
+    // Sort geometry so lights are first BEFORE building TLAS
+    auto it = std::partition(geometry.begin(), geometry.end(), [materials](const Geom& geom) {
+        return geom.materialid < materials.size() && geom.materialid >= 0 && materials[geom.materialid].emittance > 0.0f;
         });
-
     scene->m_lightCount = std::distance(geometry.begin(), it);
 
-    // Allocate geometry and material space on the GPU
-    if (geometry.size() > 0) {
+    // Build TLAS
+    std::vector<TLASNode> tlasNodes;
+
+    std::vector<GeometryBVHBuildData> geometryBuildData(geometry.size());
+    for (size_t g = 0; g < geometry.size(); g++) {
+        Geom& geom = geometry[g];
+        AABB bounds = AABB::fromGeometry(geom, {});
+        geometryBuildData[g].bounds = bounds;
+        geometryBuildData[g].centroid = (bounds.min + bounds.max) * 0.5f;
+        geometryBuildData[g].geometryIndex = g;
+    }
+
+    BVHBuilder::buildTLAS(geometryBuildData, 0, geometryBuildData.size(), tlasNodes);
+
+    // Allocate geometry
+    if (!geometry.empty()) {
         if (cudaMalloc((void**)&scene->dev_geometry, geometry.size() * sizeof(Geom)) != cudaSuccess) {
+
             throw std::runtime_error("CUDA Failed to allocate dev_geometry");
+        }
+        if (cudaMemcpy(scene->dev_geometry, geometry.data(), geometry.size() * sizeof(Geom), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy geometry to dev_geometry");
         }
     }
 
-    // We always have at least one fallback material present
-    if (cudaMalloc((void**)&scene->dev_materials, materials.size() * sizeof(Material)) != cudaSuccess) {
-        throw std::runtime_error("CUDA Failed to allocate dev_materials");
+    // Allocate materials
+    if (!materials.empty()) {
+        if (cudaMalloc((void**)&scene->dev_materials, materials.size() * sizeof(Material)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_materials");
+        }
+        if (cudaMemcpy(scene->dev_materials, materials.data(), materials.size() * sizeof(Material), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy materials to dev_materials");
+        }
     }
 
-    // Move geometry and materials to the GPU
-    if (cudaMemcpy(scene->dev_geometry, geometry.data(), geometry.size() * sizeof(Geom), cudaMemcpyHostToDevice) != cudaSuccess) {
-        throw std::runtime_error("CUDA Failed to memcopy geometry to dev_geometry");
-    }
-
-    if (cudaMemcpy(scene->dev_materials, materials.data(), materials.size() * sizeof(Material), cudaMemcpyHostToDevice) != cudaSuccess) {
-        throw std::runtime_error("CUDA Failed to memcopy materials to dev_materials");
+    // Allocate TLAS nodes
+    if (!tlasNodes.empty()) {
+        if (cudaMalloc((void**)&scene->dev_tlasNodes, tlasNodes.size() * sizeof(TLASNode)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_tlasNodes");
+        }
+        if (cudaMemcpy(scene->dev_tlasNodes, tlasNodes.data(), tlasNodes.size() * sizeof(TLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy TLAS nodes to dev_tlasNodes");
+        }
     }
 
     scene->m_geometryCount = geometry.size();
     scene->m_materialCount = materials.size();
+	scene->m_tlasNodeCount = tlasNodes.size();
 
     return scene;
 }
@@ -428,6 +452,8 @@ void parseGltfMaterials(const tg3_model& model, std::vector<Material>& outMateri
 
 std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
 {
+    std::unique_ptr<Scene> scene = std::make_unique<Scene>();
+
     tg3_parse_options opts;
     tg3_error_stack errors;
     tg3_model model;
@@ -506,13 +532,25 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
 		blasNodes.insert(blasNodes.end(), geomBlasNodes.begin(), geomBlasNodes.end());
     }
 
-	std::unique_ptr<Scene> scene = std::make_unique<Scene>();
-
-    // Sort geometry so lights are first
+    // Sort geometry so lights are first BEFORE building TLAS
     auto it = std::partition(geometry.begin(), geometry.end(), [materials](const Geom& geom) {
         return geom.materialid < materials.size() && geom.materialid >= 0 && materials[geom.materialid].emittance > 0.0f;
         });
     scene->m_lightCount = std::distance(geometry.begin(), it);
+
+    // Build TLAS
+    std::vector<TLASNode> tlasNodes;
+
+    std::vector<GeometryBVHBuildData> geometryBuildData(geometry.size());
+    for (size_t g = 0; g < geometry.size(); g++) {
+        Geom& geom = geometry[g];
+        AABB bounds = AABB::fromGeometry(geom, blasNodes);
+        geometryBuildData[g].bounds = bounds;
+        geometryBuildData[g].centroid = (bounds.min + bounds.max) * 0.5f;
+        geometryBuildData[g].geometryIndex = g;
+    }
+
+    BVHBuilder::buildTLAS(geometryBuildData, 0, geometryBuildData.size(), tlasNodes);
 
     // Allocate geometry
     if (!geometry.empty()) {
@@ -555,16 +593,30 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
         }
 	}
 
+	// Allocate TLAS nodes
+    if(!tlasNodes.empty()) {
+        if (cudaMalloc((void**)&scene->dev_tlasNodes, tlasNodes.size() * sizeof(TLASNode)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_tlasNodes");
+        }
+        if (cudaMemcpy(scene->dev_tlasNodes, tlasNodes.data(), tlasNodes.size() * sizeof(TLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy TLAS nodes to dev_tlasNodes");
+        }
+	}
+
     scene->m_geometryCount = geometry.size();
 	scene->m_materialCount = materials.size();
 	scene->m_triangleCount = sortedTriangles.size();
 	scene->m_blasNodeCount = blasNodes.size();
+	scene->m_tlasNodeCount = tlasNodes.size();
 
     return scene;
 }
 
 std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
 {
+    // Create scene
+    std::unique_ptr<Scene> scene = std::make_unique<Scene>();
+
 	tinyobj::ObjReaderConfig readerConfig;
 
 	std::filesystem::path path(filepath);
@@ -699,13 +751,25 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
 		blasNodes.insert(blasNodes.end(), geomBlasNodes.begin(), geomBlasNodes.end());
     }
 
-	std::unique_ptr<Scene> scene = std::make_unique<Scene>();
-    
-    // Sort lights
+    // Sort geometry so lights are first BEFORE building TLAS
     auto it = std::partition(geometry.begin(), geometry.end(), [materials](const Geom& geom) {
         return geom.materialid < materials.size() && geom.materialid >= 0 && materials[geom.materialid].emittance > 0.0f;
-		});
-	scene->m_lightCount = std::distance(geometry.begin(), it);
+        });
+    scene->m_lightCount = std::distance(geometry.begin(), it);
+
+    // Build TLAS
+    std::vector<TLASNode> tlasNodes;
+
+    std::vector<GeometryBVHBuildData> geometryBuildData(geometry.size());
+    for (size_t g = 0; g < geometry.size(); g++) {
+        Geom& geom = geometry[g];
+		AABB bounds = AABB::fromGeometry(geom, blasNodes);
+		geometryBuildData[g].bounds = bounds;
+		geometryBuildData[g].centroid = (bounds.min + bounds.max) * 0.5f;
+		geometryBuildData[g].geometryIndex = g;
+    }
+
+	BVHBuilder::buildTLAS(geometryBuildData, 0, geometryBuildData.size(), tlasNodes);
 
     // Copy to GPU
     if (!geometry.empty()) {
@@ -744,10 +808,20 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
         }
     }
 
+    if(!tlasNodes.empty()) {
+        if (cudaMalloc((void**)&scene->dev_tlasNodes, tlasNodes.size() * sizeof(TLASNode)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_tlasNodes");
+        }
+        if (cudaMemcpy(scene->dev_tlasNodes, tlasNodes.data(), tlasNodes.size() * sizeof(TLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy TLAS nodes to dev_tlasNodes");
+        }
+	}
+
 	scene->m_geometryCount = geometry.size();
 	scene->m_materialCount = materials.size();
 	scene->m_triangleCount = sortedTriangles.size();
 	scene->m_blasNodeCount = blasNodes.size();
+	scene->m_tlasNodeCount = tlasNodes.size();
 
     return scene;
 }
