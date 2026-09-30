@@ -25,7 +25,15 @@ struct Material
         return hasReflective > 0.0f || hasRefractive > 0.0f;
     }
 
-    __device__ glm::vec3 pickOugoingDirection(
+    __device__ glm::vec3 sampleAndEvaluateBrdf(
+        const glm::vec3& normal,
+        const glm::vec3& wi,
+        const glm::vec2& random,
+        bool bInside,
+        glm::vec3& outDirection,
+		float& outPdf);
+
+    __device__ glm::vec3 sampleBrdf(
         const glm::vec3& normal,
         const glm::vec3& wi,
         const glm::vec2& random,
@@ -39,11 +47,12 @@ struct Material
         bool bDirectionGeneratedFromBrdf
     );
 
+private:
     __device__ glm::vec3 evaluateDiffuseBrdf(
         const glm::vec3& normal,
         const glm::vec3& outgoingDirection);
 
-    __device__ glm::vec3 pickDiffuseOutgoingDirection(
+    __device__ glm::vec3 sampleDiffuseBrdf(
         const glm::vec3& normal,
         const glm::vec2& random,
         float& outPdf);
@@ -53,7 +62,7 @@ struct Material
         const glm::vec3& wi,
         const glm::vec3& outgoingDirection);
 
-    __device__ glm::vec3 pickGlossySpecularOutgoingDirection(
+    __device__ glm::vec3 sampleGlossySpecularBrdf(
         const glm::vec3& normal,
         const glm::vec3& wi,
         const glm::vec2& random,
@@ -63,7 +72,7 @@ struct Material
         bool bDirectionGeneratedFromBrdf
     );
 
-    __device__ glm::vec3 pickPerfectSpecularOutgoingDirection(
+    __device__ glm::vec3 samplePerfectSpecularBrdf(
         const glm::vec3& normal,
         const glm::vec3& wi,
         float random,

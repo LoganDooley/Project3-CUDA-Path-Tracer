@@ -304,11 +304,8 @@ __global__ void kernShade(
     glm::vec3 wi = -pathState.ray.direction;
     glm::vec3 wo = glm::vec3(0.0f);
 
-    float epsilonSign = 1.0f;
-
     float brdfPdf = 0.0f;
-    wo = material.pickOugoingDirection(intersectionData.normal, wi, glm::vec2(u01(rng), u01(rng)), intersectionData.bInside, brdfPdf);
-    brdfWeight = material.evaluateBrdf(intersectionData.normal, wi, wo, true);
+	brdfWeight = material.sampleAndEvaluateBrdf(intersectionData.normal, wi, glm::vec2(u01(rng), u01(rng)), intersectionData.bInside, wo, brdfPdf);
 
     // Update path state history tracking
 	pathState.previousBrdfPdf = brdfPdf;

@@ -4,7 +4,13 @@
 
 #include <limits>
 
-__device__ glm::vec3 Material::pickOugoingDirection(
+__device__ glm::vec3 Material::sampleAndEvaluateBrdf(const glm::vec3& normal, const glm::vec3& wi, const glm::vec2& random, bool bInside, glm::vec3& outDirection, float& outPdf)
+{
+	outDirection = sampleBrdf(normal, wi, random, bInside, outPdf);
+	return evaluateBrdf(normal, wi, outDirection, true);
+}
+
+__device__ glm::vec3 Material::sampleBrdf(
 	const glm::vec3& normal, 
 	const glm::vec3& wi, 
 	const glm::vec2& random, 
@@ -12,13 +18,13 @@ __device__ glm::vec3 Material::pickOugoingDirection(
 	float& outPdf)
 {
 	if (isSpecular()) {
-		return pickPerfectSpecularOutgoingDirection(normal, wi, random.x, bInside, outPdf);
+		return samplePerfectSpecularBrdf(normal, wi, random.x, bInside, outPdf);
 	}
 	else if (isGlossy()) {
-		return pickGlossySpecularOutgoingDirection(normal, wi, random, outPdf);
+		return sampleGlossySpecularBrdf(normal, wi, random, outPdf);
 	}
 	else {
-		return pickDiffuseOutgoingDirection(normal, random, outPdf);
+		return sampleDiffuseBrdf(normal, random, outPdf);
 	}
 }
 
@@ -45,7 +51,7 @@ __device__ glm::vec3 Material::evaluateDiffuseBrdf(
 	return brdf * cosTheta;
 }
 
-__device__ glm::vec3 Material::pickDiffuseOutgoingDirection(const glm::vec3& normal, const glm::vec2& random, float& outPdf)
+__device__ glm::vec3 Material::sampleDiffuseBrdf(const glm::vec3& normal, const glm::vec2& random, float& outPdf)
 {
 	return Samplers::sampleCosineWeightedHemisphere(normal, random, outPdf);
 }
@@ -92,7 +98,7 @@ __device__ glm::vec3 Material::evaluateGlossySpecularBrdf(
 	return (brdfSpecular + brdfDiffuse) * cosTheta;
 }
 
-__device__ glm::vec3 Material::pickGlossySpecularOutgoingDirection(
+__device__ glm::vec3 Material::sampleGlossySpecularBrdf(
 	const glm::vec3& normal, 
 	const glm::vec3& wi, 
 	const glm::vec2& random, 
@@ -117,7 +123,7 @@ __device__ glm::vec3 Material::evaluatePerfectSpecularBrdf(bool bDirectionGenera
 	}
 }
 
-__device__ glm::vec3 Material::pickPerfectSpecularOutgoingDirection(const glm::vec3& normal, const glm::vec3& wi, float random, bool bInside, float& outPdf)
+__device__ glm::vec3 Material::samplePerfectSpecularBrdf(const glm::vec3& normal, const glm::vec3& wi, float random, bool bInside, float& outPdf)
 {
 	// Flip direction for glm reflect + refract
 	glm::vec3 incident = -wi;
