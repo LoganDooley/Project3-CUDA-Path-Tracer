@@ -41,6 +41,23 @@ __device__ void get2DIndex(int index1D, int width, int* outX, int* outY) {
     *outY = index1D / width;
 }
 
+__device__ glm::vec3 reinhardToneMap(const glm::vec3& color) {
+    return color / (color + glm::vec3(1.0f));
+}
+
+__device__ glm::vec3 gammaCorrect(const glm::vec3& color, float gamma) {
+    return glm::clamp(glm::pow(color, glm::vec3(1.0f / gamma)), 0.0f, 1.0f);
+}
+
+__device__ uchar4 convertColorToUChar4(const glm::vec3& color) {
+    uchar4 pixelColor;
+    pixelColor.x = (unsigned char)(color.z * 255.0f); // Blue
+    pixelColor.y = (unsigned char)(color.y * 255.0f); // Green
+    pixelColor.z = (unsigned char)(color.x * 255.0f); // Red
+    pixelColor.w = 255; // Alpha
+    return pixelColor;
+}
+
 __device__ void writePathStateToSurface(const PathState& pathState, 
     cudaSurfaceObject_t surface, 
     glm::vec3* dev_accumulatedColor,
@@ -61,16 +78,11 @@ __device__ void writePathStateToSurface(const PathState& pathState,
     // Get average color over all samples
     glm::vec3 averageColor = dev_accumulatedColor[pixelIndex] / (float)(currentSampleIndex + 1);
 
-    glm::vec3 finalColor;
-    finalColor.x = glm::clamp(powf(averageColor.x, 1.0f / 2.2f), 0.0f, 1.0f);
-    finalColor.y = glm::clamp(powf(averageColor.y, 1.0f / 2.2f), 0.0f, 1.0f);
-    finalColor.z = glm::clamp(powf(averageColor.z, 1.0f / 2.2f), 0.0f, 1.0f);
+	glm::vec3 tonemappedColor = reinhardToneMap(averageColor);
 
-    uchar4 pixelColor;
-    pixelColor.x = (unsigned char)(finalColor.z * 255.0f); // Blue
-    pixelColor.y = (unsigned char)(finalColor.y * 255.0f); // Green
-    pixelColor.z = (unsigned char)(finalColor.x * 255.0f); // Red
-    pixelColor.w = 255;
+	glm::vec3 finalColor = gammaCorrect(tonemappedColor, 2.2f);
+
+	uchar4 pixelColor = convertColorToUChar4(finalColor);
 
     int pixelIndexX = 0;
     int pixelIndexY = 0;

@@ -663,7 +663,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
             mat.specular.exponent = objMaterial.shininess;
 			mat.specular.color = glm::vec3(objMaterial.specular[0], objMaterial.specular[1], objMaterial.specular[2]);
         }
-        materials.push_back(mat);
+        //materials.push_back(mat);
     }
 
     if (materials.empty()) {

@@ -15,6 +15,8 @@ __device__ IntersectionData DevScene::intersect(const Ray& ray) {
     nodeStack[stackPtr++] = 0; // tlas node index 0 is always the root
 
     while (stackPtr > 0) {
+        result.tlasIterationCount++;
+
         // Pop node off stack
         int nodeIndex = nodeStack[--stackPtr];
         const TLASNode& node = dev_tlasNodes[nodeIndex];

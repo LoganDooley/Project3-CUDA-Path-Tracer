@@ -30,7 +30,7 @@ public:
 	float m_moveSpeed = 2.0f;
 	float m_rotateSpeed = 0.002f;
 	float m_focalDistance = 4.0f;
-	float m_lensRadius = 0.01f;
+	float m_lensRadius = 0.0f;
 
 	bool m_hasChanged = false;
 };

@@ -13,6 +13,8 @@ struct IntersectionData {
 	int materialIndex = 0;
 	bool bInside = false;
 	float hitTriangleLocalSurfaceArea = 0.0f;
+	int blasIterationCount = 0;
+	int tlasIterationCount = 0;
 };
 
 class IntersectionStatics {
@@ -196,6 +198,8 @@ private:
 		nodeStack[stackPtr++] = geometry.blasNodeOffset;
 
 		while (stackPtr > 0) {
+			result.blasIterationCount++;
+
 			// Pop node off stack
 			int nodeIndex = nodeStack[--stackPtr];
 			const BLASNode& node = blasNodes[nodeIndex];
