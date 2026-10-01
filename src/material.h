@@ -40,6 +40,12 @@ struct Material
         bool bInside,
         float& outPdf);
 
+    __device__ float getBrdfPdf(
+        const glm::vec3& normal,
+        const glm::vec3& wi,
+        const glm::vec3& wo,
+		bool bDirectionGeneratedFromBrdf);
+
     __device__ glm::vec3 evaluateBrdf(
         const glm::vec3& normal,
         const glm::vec3& wi,

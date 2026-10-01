@@ -28,6 +28,19 @@ __device__ glm::vec3 Material::sampleBrdf(
 	}
 }
 
+__device__ float Material::getBrdfPdf(const glm::vec3& normal, const glm::vec3& wi, const glm::vec3& wo, bool bDirectionGeneratedFromBrdf)
+{
+	if(isSpecular()) {
+		return bDirectionGeneratedFromBrdf ? 1.0f : 0.0f;
+	}
+	else if (isGlossy()) {
+		return Samplers::getBlinnPhongPdf(normal, wi, wo, specular.exponent);
+	}
+	else {
+		return Samplers::getCosineWeightedHemispherePdf(normal, wo);
+	}
+}
+
 __device__ glm::vec3 Material::evaluateBrdf(const glm::vec3& normal, const glm::vec3& wi, const glm::vec3& wo, bool bDirectionGeneratedFromBrdf)
 {
 	if (isSpecular()) {

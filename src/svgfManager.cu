@@ -1,5 +1,8 @@
 #include "svgfManager.h"
 
+#include "intersection.h"
+#include "material.h"
+
 #include <cuda_runtime.h>
 
 #include <iostream>

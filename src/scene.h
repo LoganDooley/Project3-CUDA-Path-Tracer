@@ -1,12 +1,16 @@
 #pragma once
 
 #include "pathTraceCommon.h"
-
 #include "devScene.h"
-#include "bvh.h"
 
 #include <string>
 #include <memory>
+
+struct Material;
+struct BLASNode;
+struct TLASNode;
+struct Geom;
+struct Triangle;
 
 class Scene {
 public:

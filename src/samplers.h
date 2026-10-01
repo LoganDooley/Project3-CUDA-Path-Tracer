@@ -39,6 +39,11 @@ public:
 		return localSample.x * tangent + localSample.y * bitangent + localSample.z * normal;
 	}
 
+	__host__ __device__ static float getCosineWeightedHemispherePdf(const glm::vec3& normal, const glm::vec3& outgoingDirection) {
+		float cosTheta = glm::max(0.0f, glm::dot(normal, outgoingDirection));
+		return cosTheta / glm::pi<float>();
+	}
+
 	__host__ __device__ static glm::vec3 sampleCosineWeightedHemisphere(const glm::vec3& normal, const glm::vec2& random, float& outPdf) {
 		glm::vec3 localSample = sampleLocalCosineWeightedHemisphere(random);
 
@@ -52,6 +57,17 @@ public:
 		outPdf = cosTheta / glm::pi<float>();
 
 		return outgoingDirection;
+	}
+
+	__host__ __device__ static float getBlinnPhongPdf(const glm::vec3& normal, const glm::vec3& wi, const glm::vec3& wo, float specularExponent) {
+		glm::vec3 halfVector = MathHelpers::safeNormalize(wi + wo);
+		float dotNH = glm::max(0.0f, glm::dot(normal, halfVector));
+		float dotIH = glm::max(0.0f, glm::dot(wi, halfVector));
+		if (dotIH <= 0.0f) {
+			return 0.0f;
+		}
+		float dH = ((specularExponent + 2.0f) / (2.0f * glm::pi<float>())) * glm::pow(dotNH, specularExponent);
+		return dH / (4.0f * dotIH);
 	}
 
 	__host__ __device__ static glm::vec3 sampleWorldBlinnPhong(const glm::vec3& normal,

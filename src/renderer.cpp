@@ -1,5 +1,7 @@
 #include "renderer.h"
 
+#include "intersection.h"
+
 #include "stb_image_write.h"
 #include "imgui.h"
 

@@ -2,6 +2,7 @@
 
 #include "material.h"
 #include "samplers.h"
+#include "intersection.h"
 
 #define USE_TLAS 1
 
@@ -40,7 +41,7 @@ __device__ IntersectionData DevScene::intersect(const Ray& ray) {
             }
 
 			Geom geometry = dev_geometry[geomIndex];
-			IntersectionData geometryResult = IntersectionStatics::intersectGeometry(ray, geometry, dev_blasNodes, dev_triangles);
+			IntersectionData geometryResult = IntersectionStatics::intersectGeometry(ray, geometry, dev_blasNodes, dev_triangles, m_lightCount);
             if(geometryResult.t > 0.0f && (result.t < 0.0f || geometryResult.t < result.t)) {
                 result = geometryResult;
                 result.geometryIndex = geomIndex;
@@ -78,25 +79,25 @@ __device__ bool DevScene::isVisible(const Ray& ray, float tMax)
 __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random, 
     const Ray& incomingRay, 
     const IntersectionData& intersectionData,
+	glm::vec3& outDirectionToLight,
     float& outPdf)
 {
+	outDirectionToLight = glm::vec3(0.0f);
+    outPdf = 0.0f;
+
     if (m_lightCount == 0) {
+        return glm::vec3(0.0f);
+    }
+
+    int chosenLightIndex = (int)(random.w * (float)m_lightCount);
+    if (chosenLightIndex < 0 || chosenLightIndex >= m_lightCount) {
         return glm::vec3(0.0f);
     }
 
     float lightIndexPdf = 1.0 / (float)m_lightCount;
 
-    int chosenLightIndex = (int)(random.w * (float)m_lightCount);
-
-    if (chosenLightIndex < 0 || chosenLightIndex >= m_lightCount) {
-        outPdf = 0.0f;
-        return glm::vec3(0.0f);
-    }
-
     Geom lightGeometry = dev_geometry[chosenLightIndex];
-
     if (lightGeometry.materialid >= m_materialCount) {
-        outPdf = 0.0f;
         return glm::vec3(0.0f);
     }
 
@@ -114,103 +115,36 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
     }
 
     glm::vec3 hitPoint = incomingRay.getPositionAtTime(intersectionData.t);
+    glm::vec3 directionToLight = lightPosition - hitPoint;
+    float distance = glm::length(directionToLight);
+    if (distance <= 0.0001f) {
+        return glm::vec3(0.0f);
+    }
+	outDirectionToLight = directionToLight / distance;
+	glm::vec3 L = directionToLight / distance;
+
+	float cosThetaLight = glm::dot(lightNormal, -L);
+	float cosThetaSurface = glm::dot(intersectionData.normal, L);
+
+    if(cosThetaLight <= 0.0f || cosThetaSurface <= 0.0f) {
+        return glm::vec3(0.0f);
+	}
 
     Ray visibilityRay;
     const float epsilon = 0.0001f;
     visibilityRay.origin = hitPoint + epsilon * intersectionData.normal;
-    
-    glm::vec3 rayDirection = lightPosition - visibilityRay.origin;
-    float distance = glm::length(rayDirection);
-    visibilityRay.direction = rayDirection / distance;
+    visibilityRay.direction = L;
 
-    float cosThetaLight = glm::dot(lightNormal, -visibilityRay.direction);
-    float cosThetaSurface = glm::dot(intersectionData.normal, visibilityRay.direction);
-
-    if (cosThetaLight <= 0.0f || cosThetaSurface <= 0.0f) {
-        outPdf = 0.0f;
+    if (!isVisible(visibilityRay, distance - (2.0f * epsilon))) {
         return glm::vec3(0.0f);
     }
 
-    if (!isVisible(visibilityRay, distance - epsilon)) {
-        outPdf = 0.0f;
-        return glm::vec3(0.0f);
-    }
+    float pArea = lightSurfacePdf * lightIndexPdf;
+	outPdf = pArea * (distance * distance / cosThetaLight);
 
     glm::vec3 emission = lightMaterial.emittance * lightMaterial.color;
-
     Material surfaceMaterial = dev_materials[intersectionData.materialIndex];
-
     glm::vec3 brdf = surfaceMaterial.evaluateBrdf(intersectionData.normal, -incomingRay.direction, visibilityRay.direction, false);
 
-    float pArea = lightSurfacePdf;
-	float pOmega = pArea * distance * distance / cosThetaLight;
-    outPdf = pOmega * lightIndexPdf;
-
-    return (brdf * emission) / outPdf;
-}
-
-__device__ float DevScene::getLightPdf(int lightIndex, const glm::vec3& worldPosition, const glm::vec3& worldNormal, float hitTriangleLocalSurfaceArea)
-{
-    if(lightIndex < 0 || lightIndex >= m_lightCount) {
-        return 0.0f;
-	}
-
-	Geom lightGeometry = dev_geometry[lightIndex];
-
-    glm::mat3 transform3 = glm::mat3(lightGeometry.transform);
-    glm::mat3 invTranspose3 = glm::mat3(lightGeometry.invTranspose);
-
-    float lightIndexPdf = 1.0 / (float)m_lightCount;
-
-    float localPdf = 0.0f;
-    glm::vec3 localNormal = glm::vec3(0.0f);
-
-    if (lightGeometry.type == GeomType::SPHERE) {
-        constexpr float sphereArea = 4.0f * glm::pi<float>() * 0.25f;
-		localPdf = 1.0f / sphereArea;
-
-        localNormal = glm::transpose(transform3) * worldNormal;
-        localNormal = glm::normalize(localNormal);
-    }
-    else if (lightGeometry.type == GeomType::CUBE){
-		localPdf = 1.0f / 6.0f;
-
-        glm::vec3 localPos = glm::vec3(lightGeometry.inverseTransform * glm::vec4(worldPosition, 1.0f));
-
-        glm::vec3 absPos = glm::abs(localPos);
-        if (absPos.x > absPos.y && absPos.x > absPos.z) {
-            localNormal = glm::vec3(glm::sign(localPos.x), 0.0f, 0.0f);
-        }
-        else if (absPos.y > absPos.z) {
-            localNormal = glm::vec3(0.0f, glm::sign(localPos.y), 0.0f);
-        }
-        else {
-            localNormal = glm::vec3(0.0f, 0.0f, glm::sign(localPos.z));
-        }
-    }
-    else if (lightGeometry.type == GeomType::MESH) {
-        if(hitTriangleLocalSurfaceArea <= 0.0f) {
-            return 0.0f;
-		}
-        localPdf = 1.0f / (lightGeometry.triangleCount * hitTriangleLocalSurfaceArea);
-        localNormal = glm::transpose(transform3) * worldNormal;
-        localNormal = glm::normalize(localNormal);
-    }
-    else {
-        return 0.0f;
-	}
-
-    glm::vec3 worldNormalScaled = invTranspose3 * localNormal;
-    float normalScale = glm::length(worldNormalScaled);
-
-	float det = glm::abs(glm::determinant(transform3));
-    float jacobian = det * normalScale;
-
-    if (jacobian <= 0.0f) {
-        return 0.0f;
-    }
-
-	localPdf /= jacobian;
-
-	return localPdf * lightIndexPdf;
+    return brdf * emission;
 }

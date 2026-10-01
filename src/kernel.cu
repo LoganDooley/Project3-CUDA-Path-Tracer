@@ -10,6 +10,7 @@
 
 #include "samplers.h"
 #include "material.h"
+#include "intersection.h"
 
 #define MIN_RUSSIAN_ROULETTE_BOUNCES 2
 
@@ -259,20 +260,11 @@ __global__ void kernShade(
     // Handle hitting a light
     if (material.emittance > 0.0f) {
         // What are the chances that this would be hit by sampling the lights previously 
-        float lightPdf = dev_scene.getLightPdf(intersectionData.geometryIndex, pathState.ray.getPositionAtTime(intersectionData.t), intersectionData.normal, intersectionData.hitTriangleLocalSurfaceArea);
-
-		const float epsilon = 0.0001f;
-        float distance = intersectionData.t;
-        float cosThetaLight = glm::dot(intersectionData.normal, -pathState.ray.direction);
-
-        float lightPdfSolidAngle = 0.0f;
-        if(lightPdf > 0.0f && cosThetaLight > epsilon) {
-            lightPdfSolidAngle = (lightPdf * distance * distance) / cosThetaLight;
-		}
+        float lightPdf = intersectionData.pdfIfLight;
 
         float misWeight = 1.0f;
-        if (!pathState.previousSpecular && (pathState.previousBrdfPdf + lightPdfSolidAngle) > 0.0f) {
-			misWeight = MathHelpers::powerHeuristic(pathState.previousBrdfPdf, lightPdfSolidAngle);
+        if (!pathState.previousSpecular && (pathState.previousBrdfPdf + lightPdf) > 0.0f) {
+			misWeight = MathHelpers::powerHeuristic(pathState.previousBrdfPdf, lightPdf);
         }
         
         pathState.accumulatedColor += pathState.throughput * material.color * material.emittance * misWeight;
@@ -290,12 +282,15 @@ __global__ void kernShade(
     if (!material.isSpecular()) {
         glm::vec4 neeRandom = glm::vec4(u01(rng), u01(rng), u01(rng), u01(rng));
 
+		glm::vec3 directionToLight = glm::vec3(0.0f);
         float lightPdf = 0.0f;
-        glm::vec3 lightSample = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData, lightPdf);
+        glm::vec3 lightSample = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData, directionToLight, lightPdf);
 
-        if (lightPdf > 0.0f && pathState.previousBrdfPdf >= 0.0f) {
-			float misWeight = MathHelpers::powerHeuristic(lightPdf, pathState.previousBrdfPdf);
-			pathState.accumulatedColor += pathState.throughput * lightSample * misWeight;
+        if (lightPdf > 0.0f && glm::length(lightSample) > 0.0f) {
+			// Find the pdf if this direction was sampled from the BRDF
+			float pdfBrdf = material.getBrdfPdf(intersectionData.normal, -pathState.ray.direction, directionToLight, false);
+			float misWeight = MathHelpers::powerHeuristic(lightPdf, pdfBrdf);
+			pathState.accumulatedColor += pathState.throughput * (lightSample / lightPdf) * misWeight;
         }
     }
 

@@ -1,5 +1,9 @@
 #include "scene.h"
 
+#include "bvh.h"
+#include "material.h"
+#include "pathTraceCommon.h"
+
 // External Includes
 #include <cuda_runtime.h>
 #include <nlohmann/json.hpp>

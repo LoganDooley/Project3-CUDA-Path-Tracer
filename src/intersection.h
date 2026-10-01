@@ -1,10 +1,12 @@
 #pragma once
 
 #include "ray.h"
-
 #include "mathHelpers.h"
-
 #include "bvh.h"
+#include "devScene.h"
+
+#include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
 
 struct IntersectionData {
 	glm::vec3 normal = glm::vec3(1, 0, 0);
@@ -12,15 +14,15 @@ struct IntersectionData {
 	int geometryIndex = -1;
 	int materialIndex = 0;
 	bool bInside = false;
-	float hitTriangleLocalSurfaceArea = 0.0f;
+	float pdfIfLight = 0.0f;
 	int blasIterationCount = 0;
 	int tlasIterationCount = 0;
 };
 
 class IntersectionStatics {
 public:
-	__device__ static IntersectionData intersectGeometry(const Ray& ray, const Geom& geometry, const BLASNode* sceneBLASNodes, const Triangle* sceneTriangles) {
-		// Convert world space -> object spce
+	__device__ static IntersectionData intersectGeometry(const Ray& ray, const Geom& geometry, const BLASNode* dev_blasNodes, const Triangle* dev_triangles, int lightCount) {
+		// Convert world space -> object space
 		Ray objectSpaceRay = ray.transform(geometry.inverseTransform);
 
 		// Run intersection
@@ -32,7 +34,7 @@ public:
 			result = intersectBox(objectSpaceRay);
 		}
 		else if (geometry.type == GeomType::MESH) {
-			result = intersectMesh(objectSpaceRay, geometry, sceneBLASNodes, sceneTriangles);
+			result = intersectMesh(objectSpaceRay, geometry, dev_blasNodes, dev_triangles);
 		}
 
 		if (result.t <= 0.0f) {
@@ -42,8 +44,36 @@ public:
 		result.materialIndex = geometry.materialid;
 
 		// Convert normal to world space
-		glm::vec4 worldNormal = geometry.invTranspose * glm::vec4(result.normal, 0.0f);
+		glm::vec3 worldNormal = glm::vec3(geometry.invTranspose * glm::vec4(result.normal, 0.0f));
+		float normalScale = glm::length(worldNormal);
 		result.normal = MathHelpers::safeNormalize(glm::vec3(worldNormal));
+
+		float det = glm::abs(glm::determinant(geometry.transform));
+		float jacobian = det * normalScale;
+		if(jacobian <= 0.0f) {
+			result.pdfIfLight = 0.0f;
+		}
+		else {
+			result.pdfIfLight = result.pdfIfLight / jacobian;
+		}
+
+		/// Divide pdfIfLight by number of lights to match NEE sampling
+		if (lightCount > 0) {
+			result.pdfIfLight = result.pdfIfLight / lightCount;
+		}
+		else {
+			result.pdfIfLight = 0.0f;
+		}
+
+		// Convert pdf if light to solid angle pdf
+		float distanceSquared = result.t * result.t;
+		float cosTheta = glm::abs(glm::dot(result.normal, -ray.direction));
+		if(cosTheta <= 0.0001f) {
+			result.pdfIfLight = 0.0f;
+		}
+		else {
+			result.pdfIfLight = result.pdfIfLight * (distanceSquared / cosTheta);
+		}
 
 		// Convert t to world space
 		glm::vec3 worldPosition = glm::vec3(geometry.transform * glm::vec4(objectSpaceRay.getPositionAtTime(result.t), 1.0f));
@@ -89,6 +119,9 @@ private:
 		// Flip the normal if we were inside
 		float normalSign = result.bInside ? -1.0f : 1.0f;
 		result.normal *= normalSign;
+
+		// Fill in pdf if this was a light
+		result.pdfIfLight = 1.0 / glm::pi<float>();
 
 		return result;
 	}
@@ -144,6 +177,9 @@ private:
 		float normalSign = result.bInside ? -1.0f : 1.0f;
 		result.normal *= normalSign;
 
+		// Fill in pdf if this was a light
+		result.pdfIfLight = 1.0f / 6.0f;
+
 		return result;
 	}
 
@@ -176,7 +212,11 @@ private:
 			result.t = t;
 			glm::vec3 cross = glm::cross(edge1, edge2);
 			float crossMagnitude = glm::length(cross);
-			result.hitTriangleLocalSurfaceArea = 0.5f * crossMagnitude;
+
+			// Fill in pdf if this was a light
+			float triangleArea = 0.5f * crossMagnitude;
+			result.pdfIfLight = 1.0f / triangleArea;
+
 			result.normal = MathHelpers::safeNormalize(cross);
 			result.bInside = glm::dot(result.normal, ray.direction) > 0.0f;
 		}
@@ -239,6 +279,9 @@ private:
 			// Flip the normal if we were inside
 			float normalSign = result.bInside ? -1.0f : 1.0f;
 			result.normal *= normalSign;
+
+			// Update pdfifLight based on the number of triangles
+			result.pdfIfLight = result.pdfIfLight / geometry.triangleCount;
 		}
 
 		return result;
