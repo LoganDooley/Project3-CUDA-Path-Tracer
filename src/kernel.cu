@@ -243,7 +243,7 @@ __global__ void kernShade(
 
     // Handle misses
     if (intersectionData.t <= 0.0f) {
-        pathState.accumulatedColor += sampleEnvironmentMap(environmentMap, pathState.ray.direction);
+        pathState.accumulatedColor += pathState.throughput * sampleEnvironmentMap(environmentMap, pathState.ray.direction);
         pathState.active = false;
         writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, pathState.bounceCount == 0);
         return;
@@ -263,11 +263,11 @@ __global__ void kernShade(
         float lightPdf = intersectionData.pdfIfLight;
 
         float misWeight = 1.0f;
-        if (!pathState.previousSpecular && (pathState.previousBrdfPdf + lightPdf) > 0.0f) {
+        if (!pathState.previousDelta && (pathState.previousBrdfPdf + lightPdf) > 0.0f) {
 			misWeight = MathHelpers::powerHeuristic(pathState.previousBrdfPdf, lightPdf);
         }
         
-        pathState.accumulatedColor += pathState.throughput * material.color * material.emittance * misWeight;
+        pathState.accumulatedColor += pathState.throughput * material.albedo * material.emittance * misWeight;
 
         // Hitting a light terminates the path
         pathState.active = false;
@@ -279,50 +279,55 @@ __global__ void kernShade(
     thrust::uniform_real_distribution<float> u01(0, 1);
     
     // Next Event Estimation (Sample lights)
-    if (!material.isSpecular()) {
+    if (!material.isDelta()) {
         glm::vec4 neeRandom = glm::vec4(u01(rng), u01(rng), u01(rng), u01(rng));
-
 		glm::vec3 directionToLight = glm::vec3(0.0f);
         float lightPdf = 0.0f;
+
         glm::vec3 lightSample = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData, directionToLight, lightPdf);
 
         if (lightPdf > 0.0f && glm::length(lightSample) > 0.0f) {
 			// Find the pdf if this direction was sampled from the BRDF
-			float pdfBrdf = material.getBrdfPdf(intersectionData.normal, -pathState.ray.direction, directionToLight, false);
+			glm::vec3 wi = -pathState.ray.direction;
+			glm::vec3 f = material.evaluate(intersectionData.normal, wi, directionToLight, intersectionData.bInside, false);
+			float pdfBrdf = material.pdf(intersectionData.normal, wi, directionToLight, intersectionData.bInside, false);
+
 			float misWeight = MathHelpers::powerHeuristic(lightPdf, pdfBrdf);
-			pathState.accumulatedColor += pathState.throughput * (lightSample / lightPdf) * misWeight;
+
+            float cosThetaNE = glm::max(0.0f, glm::abs(glm::dot(intersectionData.normal, directionToLight)));
+			pathState.accumulatedColor += pathState.throughput * (lightSample / lightPdf) * f * cosThetaNE * misWeight;
         }
     }
 
 	// Indirect lighting (Sample BRDF)
-    glm::vec3 brdfWeight = glm::vec3(0.0f);
     glm::vec3 wi = -pathState.ray.direction;
     glm::vec3 wo = glm::vec3(0.0f);
-
+    glm::vec3 sampleThroughput = glm::vec3(0.0f);
     float brdfPdf = 0.0f;
-	brdfWeight = material.sampleAndEvaluateBrdf(intersectionData.normal, wi, glm::vec2(u01(rng), u01(rng)), intersectionData.bInside, wo, brdfPdf);
+    bool bIsTransmission = false;
+
+	material.sample(
+        intersectionData.normal, 
+        wi, 
+        glm::vec3(u01(rng), u01(rng), u01(rng)), 
+        intersectionData.bInside, 
+        wo, 
+        sampleThroughput, 
+        brdfPdf, 
+        bIsTransmission);
 
     // Update path state history tracking
 	pathState.previousBrdfPdf = brdfPdf;
-	pathState.previousSpecular = material.isSpecular();
+	pathState.previousDelta = material.isDelta();
 
-    // Handle invalid pdf
-    if (brdfPdf <= 0.0f) {
+    // Handle invalid pdf or throughput
+	if (brdfPdf <= 0.0f || glm::all(glm::lessThanEqual(sampleThroughput, glm::vec3(0.0f)))) {
         pathState.active = false;
         writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
         return;
 	}
 
-    brdfWeight /= brdfPdf;
-
-    // If throughput will be zero, terminate the path
-    if (brdfWeight.x <= 0.0f && brdfWeight.y <= 0.0f && brdfWeight.z <= 0.0f) {
-        pathState.active = false;
-        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
-        return;
-    }
-
-    pathState.throughput *= brdfWeight;
+    pathState.throughput *= sampleThroughput;
 
     // Update ray for next iteration
     glm::vec3 intersectionPosition = pathState.ray.getPositionAtTime(intersectionData.t);
@@ -540,11 +545,11 @@ struct GetMaterialType {
 
         const Material& material = dev_materials[intersection.materialIndex];
 
-        if (material.isSpecular()) {
+        if (material.type == MaterialType::PerfectSpecular) {
             return 1;
         }
 
-        if (material.isGlossy()) {
+        if (material.type == MaterialType::BlinnPhong) {
             return 2;
         }
 

@@ -154,7 +154,10 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath)
         for (const auto& [name, data] : sceneJson["Materials"].items()) {
             Material mat{};
             if (data.contains("RGB")) {
-                mat.color = parseVec3(data["RGB"]);
+                mat.albedo = parseVec3(data["RGB"]);
+            }
+            else {
+				mat.albedo = glm::vec3(1.0f);
             }
 
             std::string type = data.value("TYPE", "Diffuse");
@@ -162,17 +165,25 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath)
                 mat.emittance = data.value("EMITTANCE", 0.0f);
             }
             else if (type == "Specular") {
+				mat.type = MaterialType::BlinnPhong;
                 float roughness = data.value("ROUGHNESS", 0.0f);
-                mat.specular.exponent = glm::mix(1000.0f, 1.0f, roughness);
-                mat.specular.color = mat.color;
+                if(data.contains("SPECULAR_COLOR")) {
+                    mat.blinnPhong.specularColor = parseVec3(data["SPECULAR_COLOR"]);
+				}
+                else {
+					mat.blinnPhong.specularColor = glm::vec3(1.0f);
+                }
+				mat.blinnPhong.exponent = glm::mix(1.0f, 1000.0f, 1.0f - roughness);
+				mat.blinnPhong.bRefractive = false;
             }
             else if (type == "Mirror") {
-                mat.hasReflective = 1.0f;
+                mat.type = MaterialType::PerfectSpecular;
+                mat.blinnPhong.bRefractive = false;
             }
             else if (type == "Glass") {
-                mat.hasRefractive = 1.0f;
-                mat.indexOfRefraction = data.value("IOR", 1.5f);
-                mat.hasReflective = 1.0f;
+				mat.type = MaterialType::PerfectSpecular;
+                mat.blinnPhong.bRefractive = true;
+                mat.ior = data.value("IOR", 1.5f);
             }
 
             materials.push_back(mat);
@@ -180,7 +191,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath)
         }
     }
     if (materials.empty()) {
-        // Add a fallback
+        // Add a fallback diffuse pink material
         materials.push_back(Material{});
     }
 
@@ -417,32 +428,32 @@ void parseGltfMaterials(const tg3_model& model, std::vector<Material>& outMateri
         const tg3_material& gltfMat = model.materials[i];
         Material mat{};
 
+        mat.type = MaterialType::PbrMetallicRoughness;
+
         float emissiveSum = gltfMat.emissive_factor[0] + gltfMat.emissive_factor[1] + gltfMat.emissive_factor[2];
         
         if (emissiveSum > 0.0f) {
-            mat.color = glm::vec3(
+            mat.albedo = glm::vec3(
                 gltfMat.emissive_factor[0],
                 gltfMat.emissive_factor[1],
                 gltfMat.emissive_factor[2]
 			);
             mat.emittance = 1.0f;
+            outMaterials.push_back(mat);
+            continue;
         }
-        else {
-            mat.color = glm::vec3(
-                gltfMat.pbr_metallic_roughness.base_color_factor[0],
-                gltfMat.pbr_metallic_roughness.base_color_factor[1],
-                gltfMat.pbr_metallic_roughness.base_color_factor[2]
-			);
-            mat.emittance = 0.0f;
-        }
+        mat.albedo = glm::vec3(
+            gltfMat.pbr_metallic_roughness.base_color_factor[0],
+            gltfMat.pbr_metallic_roughness.base_color_factor[1],
+            gltfMat.pbr_metallic_roughness.base_color_factor[2]
+        );
+        mat.emittance = 0.0f;
 
-        float roughness = gltfMat.pbr_metallic_roughness.roughness_factor;
-        if (roughness < 0.08f) {
-            mat.hasReflective = 1.0f;
-        }
-        else {
-            mat.specular.exponent = glm::mix(1000.0f, 1.0f, roughness);
-            mat.specular.color = mat.color;
+		mat.pbr.roughness = gltfMat.pbr_metallic_roughness.roughness_factor;
+		mat.pbr.metallic = gltfMat.pbr_metallic_roughness.metallic_factor;
+
+        if (mat.pbr.roughness > 0.99f && mat.pbr.metallic == 0.0f && mat.pbr.transmission == 0.0f) {
+            mat.type = MaterialType::OpaqueDiffuse;
         }
 
         outMaterials.push_back(mat);
@@ -650,28 +661,66 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
     // Parse materials from obj
     for (const auto& objMaterial : objMaterials) {
         Material mat{};
+        
+        mat.albedo = glm::vec3(objMaterial.diffuse[0], objMaterial.diffuse[1], objMaterial.diffuse[2]);
+		mat.blinnPhong.specularColor = glm::vec3(objMaterial.specular[0], objMaterial.specular[1], objMaterial.specular[2]);
+		mat.blinnPhong.exponent = glm::clamp(objMaterial.shininess, 0.0f, 1000.0f);
+        mat.ior = glm::max(1.0f, objMaterial.ior);
+
 		float emissiveSum = objMaterial.emission[0] + objMaterial.emission[1] + objMaterial.emission[2];
         if(emissiveSum > 0.0f) {
-            mat.color = glm::vec3(objMaterial.emission[0], objMaterial.emission[1], objMaterial.emission[2]);
+            mat.type = MaterialType::OpaqueDiffuse;
+            mat.albedo = glm::vec3(objMaterial.emission[0], objMaterial.emission[1], objMaterial.emission[2]);
             mat.emittance = 1.0f;
+            materials.push_back(mat);
+            continue;
         }
-        else {
-            mat.color = glm::vec3(objMaterial.diffuse[0], objMaterial.diffuse[1], objMaterial.diffuse[2]);
-            mat.emittance = 0.0f;
+
+        // Check for perfect glass
+        if(objMaterial.illum == 4 || objMaterial.illum == 9 || objMaterial.dissolve < 1.0f ||
+            objMaterial.transmittance[0] > 0.0f || objMaterial.transmittance[1] > 0.0f || objMaterial.transmittance[2] > 0.0f) {
+            mat.type = MaterialType::PerfectSpecular;
+            mat.blinnPhong.bRefractive = true;
+            if(mat.ior <= 1.0f) {
+                mat.ior = 1.5f; // Default IOR for glass if not specified
+			}
+            materials.push_back(mat);
+            continue;
 		}
 
-        if (objMaterial.shininess > 100.0f || objMaterial.ior > 1.0f) {
-            mat.hasReflective = 1.0f;
+        // Check for perfect mirror
+        if (objMaterial.illum == 3) {
+            mat.type = MaterialType::PerfectSpecular;
+            mat.blinnPhong.bRefractive = false;
+            materials.push_back(mat);
+			continue;
         }
+
+        bool bSpecular = (mat.blinnPhong.specularColor.r > 0.0f ||
+            mat.blinnPhong.specularColor.g > 0.0f ||
+			mat.blinnPhong.specularColor.b > 0.0f);
+
+        if(bSpecular && objMaterial.shininess > 0.0f) {
+            mat.type = MaterialType::BlinnPhong;
+            mat.blinnPhong.bRefractive = false;
+            materials.push_back(mat);
+            continue;
+		}
         else {
-            mat.specular.exponent = objMaterial.shininess;
-			mat.specular.color = glm::vec3(objMaterial.specular[0], objMaterial.specular[1], objMaterial.specular[2]);
+			mat.type = MaterialType::OpaqueDiffuse;
         }
-        //materials.push_back(mat);
+
+        materials.push_back(mat);
     }
 
     if (materials.empty()) {
-        materials.push_back(Material{});
+		Material diffuse = Material{};
+        Material glass = Material{};
+		glass.type = MaterialType::PerfectSpecular;
+		glass.albedo = glm::vec3(1.0f);
+		glass.ior = 1.5f;
+		glass.blinnPhong.bRefractive = true;
+        materials.push_back(glass);
     }
 
     // Parse meshes
@@ -711,6 +760,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
             triangles.push_back(tri);
 
 			int objMaterialId = shape.mesh.material_ids[f];
+            objMaterialId = 0;
 			geom.materialid = (objMaterialId >= 0 && objMaterialId < materials.size()) ? objMaterialId : 0;
 
 			indexOffset += fv;

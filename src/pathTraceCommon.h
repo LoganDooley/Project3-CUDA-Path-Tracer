@@ -14,7 +14,7 @@ struct PathState {
 
 	// For MIS
 	float previousBrdfPdf = 0.0f;
-	bool previousSpecular = true;
+	bool previousDelta = true;
 };
 
 enum GeomType

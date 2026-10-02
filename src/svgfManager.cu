@@ -96,15 +96,7 @@ __global__ void kernCaptureGBuffer(
 	glm::vec2 motionVector = calculateMotionVector(worldPos, currentViewProj, prevViewProj, width, height);
 	dev_gBuffer_motionVectors[pixelIdx] = motionVector;
 
-	float roughness = 0.0f;
-	if (intersectionData.geometryIndex <= dev_scene.m_geometryCount) {
-		Geom geometry = dev_scene.dev_geometry[intersectionData.geometryIndex];
-		if (geometry.materialid <= dev_scene.m_materialCount) {
-			Material material = dev_scene.dev_materials[geometry.materialid];
-			roughness = material.specular.exponent;
-		}
-	}
-	dev_gBuffer_roughness[pixelIdx] = getRoughnessFromExponent(roughness);
+	dev_gBuffer_roughness[pixelIdx] = 1.0f; // TODO: Remove this buffer
 }
 __device__ bool isHistoryValid(
 	glm::vec3 currNormal, float currDepth,

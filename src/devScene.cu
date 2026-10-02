@@ -89,11 +89,11 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
         return glm::vec3(0.0f);
     }
 
+    // Pick a random light
     int chosenLightIndex = (int)(random.w * (float)m_lightCount);
     if (chosenLightIndex < 0 || chosenLightIndex >= m_lightCount) {
         return glm::vec3(0.0f);
     }
-
     float lightIndexPdf = 1.0 / (float)m_lightCount;
 
     Geom lightGeometry = dev_geometry[chosenLightIndex];
@@ -106,6 +106,7 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
         return glm::vec3(0.0f);
     }
 
+    // Sample a point on the light
     glm::vec3 lightNormal = glm::vec3(0.0f);
     float lightSurfacePdf = 1.0f;
     glm::vec3 lightPosition = Samplers::sampleGeometry(lightGeometry, dev_triangles, glm::vec3(random), lightNormal, lightSurfacePdf);
@@ -126,13 +127,15 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
 	float cosThetaLight = glm::dot(lightNormal, -L);
 	float cosThetaSurface = glm::dot(intersectionData.normal, L);
 
-    if(cosThetaLight <= 0.0f || cosThetaSurface <= 0.0f) {
+    if(cosThetaLight <= 0.0f || cosThetaSurface == 0.0f) {
         return glm::vec3(0.0f);
 	}
 
     Ray visibilityRay;
     const float epsilon = 0.0001f;
-    visibilityRay.origin = hitPoint + epsilon * intersectionData.normal;
+
+	glm::vec3 offsetDirection = (cosThetaSurface > 0.0f) ? intersectionData.normal : -intersectionData.normal;
+    visibilityRay.origin = hitPoint + epsilon * offsetDirection;
     visibilityRay.direction = L;
 
     if (!isVisible(visibilityRay, distance - (2.0f * epsilon))) {
@@ -142,9 +145,5 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
     float pArea = lightSurfacePdf * lightIndexPdf;
 	outPdf = pArea * (distance * distance / cosThetaLight);
 
-    glm::vec3 emission = lightMaterial.emittance * lightMaterial.color;
-    Material surfaceMaterial = dev_materials[intersectionData.materialIndex];
-    glm::vec3 brdf = surfaceMaterial.evaluateBrdf(intersectionData.normal, -incomingRay.direction, visibilityRay.direction, false);
-
-    return brdf * emission;
+    return lightMaterial.emittance * lightMaterial.albedo;
 }
