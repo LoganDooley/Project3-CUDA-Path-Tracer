@@ -4,6 +4,6 @@ struct RenderSettings {
 	bool bMSAAEnabled = true;
 	bool bSVGFEnabled = false;
 
-	bool bStreamCompactionEnabled = true;
+	bool bStreamCompactionEnabled = false;
 	bool bSortPathsByMaterial = false;
 };

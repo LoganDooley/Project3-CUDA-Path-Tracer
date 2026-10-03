@@ -11,6 +11,7 @@
 struct IntersectionData {
 	glm::vec3 normal = glm::vec3(1, 0, 0);
 	float t = -1.0f;
+	glm::vec2 uv = glm::vec2(0.0f);
 	int geometryIndex = -1;
 	int materialIndex = 0;
 	bool bInside = false;
@@ -219,6 +220,10 @@ private:
 
 			result.normal = MathHelpers::safeNormalize(cross);
 			result.bInside = glm::dot(result.normal, ray.direction) > 0.0f;
+		
+			float w = 1.0f - u - v;
+
+			result.uv = w * tri.uv0 + u * tri.uv1 + v * tri.uv2;
 		}
 
 		return result;

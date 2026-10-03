@@ -5,6 +5,9 @@
 #include "pathTraceCommon.h"
 #include "microfacet.h"
 
+struct DevScene;
+struct IntersectionData;
+
 enum class MaterialType : int {
     OpaqueDiffuse = 0, // Simple diffuse material
 	PerfectSpecular = 1, // Mirror or glass material. Uses blinnPhong.bRefractive to distinguish
@@ -16,6 +19,7 @@ struct Material
 {
 	MaterialType type = MaterialType::OpaqueDiffuse;
 	glm::vec3 albedo = glm::vec3(1.0, 0.0, 0.203);
+	cudaTextureObject_t albedoTexture = 0;
     float emittance = 0.0f;
     float ior = 1.0f;
 
@@ -32,6 +36,7 @@ struct Material
             float metallic = 0.0f;
             float roughness = 1.0f;
             float transmission = 0.0f;
+			cudaTextureObject_t metallicRoughnessTexture = 0;
         } pbr;
 	};
 
@@ -47,6 +52,8 @@ struct Material
         }
         return false;
 	}
+
+    __device__ void initializeFromIntersection(const IntersectionData& intersectionData);
 
 	__device__ glm::vec3 evaluate(
         const glm::vec3& n, 

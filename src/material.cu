@@ -1,8 +1,33 @@
 #include "material.h"
 
 #include "samplers.h"
+#include "devScene.h"
+#include "intersection.h"
 
 #include <limits>
+
+__device__ void Material::initializeFromIntersection(const IntersectionData& intersectionData)
+{
+	float u = intersectionData.uv.x;
+	float v = intersectionData.uv.y;
+
+	v = 1.0f - v;
+	if(albedoTexture != 0) {
+		float4 texColor = tex2D<float4>(albedoTexture, u, v);
+
+		// Linearize albedo color
+		albedo.x = powf(texColor.x, 2.2f);
+		albedo.y = powf(texColor.y, 2.2f);
+		albedo.z = powf(texColor.z, 2.2f);
+	}
+
+	if(type == MaterialType::PbrMetallicRoughness && pbr.metallicRoughnessTexture != 0) {
+		float4 texColor = tex2D<float4>(pbr.metallicRoughnessTexture, u, v);
+
+		pbr.metallic *= texColor.y;
+		pbr.roughness *= texColor.z;
+	}
+}
 
 __device__ glm::vec3 Material::evaluate(const glm::vec3& n, const glm::vec3& wi, const glm::vec3& wo, bool bInside, bool bDirectionGeneratedFromBrdf)
 {

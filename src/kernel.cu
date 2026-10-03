@@ -255,7 +255,9 @@ __global__ void kernShade(
         return;
     }
 
+    // Make copy of material so we can load in roughness and albedo from textures
     Material material = dev_scene.dev_materials[intersectionData.materialIndex];
+	material.initializeFromIntersection(intersectionData); // Set albedo, roughness, and metallic from textures if applicable
 
     // Handle hitting a light
     if (material.emittance > 0.0f) {
@@ -266,7 +268,7 @@ __global__ void kernShade(
         if (!pathState.previousDelta && (pathState.previousBrdfPdf + lightPdf) > 0.0f) {
 			misWeight = MathHelpers::powerHeuristic(pathState.previousBrdfPdf, lightPdf);
         }
-        
+
         pathState.accumulatedColor += pathState.throughput * material.albedo * material.emittance * misWeight;
 
         // Hitting a light terminates the path
@@ -351,6 +353,33 @@ __global__ void kernShade(
 
     // Increment bounce count
     pathState.bounceCount += 1;
+}
+
+__global__ void kernDebugUV(cudaSurfaceObject_t surface,
+    IntersectionData* intersectionData,
+    int n,
+    int width)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int pixelIndex = y * width + x;
+    if(pixelIndex < 0 || pixelIndex >= n) {
+        return;
+	}
+	IntersectionData intersection = intersectionData[pixelIndex];
+
+    float r = intersection.uv.x;
+    float g = intersection.uv.y;
+    float b = 0.0f;
+
+    uchar4 pixelColor;
+    pixelColor.x = (unsigned char)(b * 255.0f); // Blue
+    pixelColor.y = (unsigned char)(g * 255.0f); // Green
+    pixelColor.z = (unsigned char)(r * 255.0f); // Red
+    pixelColor.w = 255;
+
+    surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
 }
 
 __global__ void kernColorSurface(cudaSurfaceObject_t surface, 
@@ -506,6 +535,13 @@ void launchColorKernel(cudaSurfaceObject_t surface, int width, int height, float
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
 
     fillSurfaceColorKernel << <gridSize, blockSize >> > (surface, width, height, r, g, b);
+}
+
+void launchDebugUVKernel(IntersectionData* dev_intersectionData, cudaSurfaceObject_t surface, int width, int height)
+{
+    dim3 blockSize(16, 16);
+    dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
+	kernDebugUV << <gridSize, blockSize >> > (surface, dev_intersectionData, width * height, width);
 }
 
 struct is_path_active {

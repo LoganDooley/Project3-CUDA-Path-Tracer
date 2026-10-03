@@ -130,6 +130,14 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             sortPathsByMaterial(dev_pathStates, dev_intersectionData, currentActivePathCount, scene->dev_materials);
         }
 
+        /*
+        launchDebugUVKernel(dev_intersectionData, m_cudaSurfaceObject, m_extent.width, m_extent.height);
+        m_frameIndex++;
+
+        cudaDeviceSynchronize();
+        return;
+        */
+
         launchShadeKernel(dev_pathStates,
             dev_intersectionData,
             scene,

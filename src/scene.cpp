@@ -3,6 +3,7 @@
 #include "bvh.h"
 #include "material.h"
 #include "pathTraceCommon.h"
+#include "texture.h"
 
 // External Includes
 #include <cuda_runtime.h>
@@ -37,7 +38,178 @@ Scene::Scene()
 {
 }
 
+Scene::Scene(const std::vector<Geom>& geometry,
+    int lightCount,
+    const std::vector<Triangle>& triangles, 
+    const std::vector<BLASNode>& blasNodes, 
+    const std::vector<TLASNode>& tlasNodes, 
+    const std::vector<Material>& materials, 
+    const std::vector<cudaTextureObject_t>& textures, 
+    const std::vector<cudaArray_t>& textureArrays) :
+	m_geometryCount(geometry.size()),
+	m_lightCount(lightCount),
+	m_triangleCount(triangles.size()),
+	m_blasNodeCount(blasNodes.size()),
+	m_tlasNodeCount(tlasNodes.size()),
+	m_materialCount(materials.size()),
+	m_textures(textures),
+	m_textureArrays(textureArrays)
+{
+    if (!geometry.empty()) {
+        if (cudaMalloc((void**)&dev_geometry, geometry.size() * sizeof(Geom)) != cudaSuccess) {
+
+            throw std::runtime_error("CUDA Failed to allocate dev_geometry");
+        }
+        if (cudaMemcpy(dev_geometry, geometry.data(), geometry.size() * sizeof(Geom), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy geometry to dev_geometry");
+        }
+    }
+
+    // Allocate materials
+    if (!materials.empty()) {
+        if (cudaMalloc((void**)&dev_materials, materials.size() * sizeof(Material)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_materials");
+        }
+        if (cudaMemcpy(dev_materials, materials.data(), materials.size() * sizeof(Material), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy materials to dev_materials");
+        }
+    }
+
+    // Allocate triangles
+    if (!triangles.empty()) {
+        if (cudaMalloc((void**)&dev_triangles, triangles.size() * sizeof(Triangle)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_triangles");
+        }
+        if (cudaMemcpy(dev_triangles, triangles.data(), triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy triangles to dev_triangles");
+        }
+    }
+
+    // Allocate BLAS nodes
+    if (!blasNodes.empty()) {
+        if (cudaMalloc((void**)&dev_blasNodes, blasNodes.size() * sizeof(BLASNode)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_blasNodes");
+        }
+        if (cudaMemcpy(dev_blasNodes, blasNodes.data(), blasNodes.size() * sizeof(BLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy BLAS nodes to dev_blasNodes");
+        }
+    }
+
+    // Allocate TLAS nodes
+    if (!tlasNodes.empty()) {
+        if (cudaMalloc((void**)&dev_tlasNodes, tlasNodes.size() * sizeof(TLASNode)) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to allocate dev_tlasNodes");
+        }
+        if (cudaMemcpy(dev_tlasNodes, tlasNodes.data(), tlasNodes.size() * sizeof(TLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
+            throw std::runtime_error("CUDA Failed to memcopy TLAS nodes to dev_tlasNodes");
+        }
+    }
+}
+
 Scene::~Scene()
+{
+    if (dev_geometry) {
+        cudaFree(dev_geometry);
+        dev_geometry = nullptr;
+    }
+
+    if (dev_triangles) {
+        cudaFree(dev_triangles);
+        dev_triangles = nullptr;
+    }
+
+    if (dev_blasNodes) {
+        cudaFree(dev_blasNodes);
+        dev_blasNodes = nullptr;
+    }
+
+    if (dev_tlasNodes) {
+        cudaFree(dev_tlasNodes);
+        dev_tlasNodes = nullptr;
+    }
+
+    if (dev_materials) {
+        cudaFree(dev_materials);
+        dev_materials = nullptr;
+    }
+
+    for(auto texture : m_textures) {
+        if(texture) {
+            cudaDestroyTextureObject(texture);
+        }
+	}
+    m_textures.clear();
+
+    for(auto textureArray : m_textureArrays) {
+        if (textureArray) {
+            cudaFreeArray(textureArray);
+        }
+    }
+	m_textureArrays.clear();
+}
+
+Scene& Scene::operator=(Scene&& other) noexcept
+{
+    if (this != &other) {
+		freeDeviceMemory();
+
+        // Move from other scene
+        dev_geometry = other.dev_geometry;
+        m_geometryCount = other.m_geometryCount;
+        dev_materials = other.dev_materials;
+        m_materialCount = other.m_materialCount;
+        dev_triangles = other.dev_triangles;
+        m_triangleCount = other.m_triangleCount;
+		dev_blasNodes = other.dev_blasNodes;
+		m_blasNodeCount = other.m_blasNodeCount;
+        dev_tlasNodes = other.dev_tlasNodes;
+		m_tlasNodeCount = other.m_tlasNodeCount;
+		m_textures = std::move(other.m_textures);
+		m_textureArrays = std::move(other.m_textureArrays);
+		
+        // Clear other scene
+        other.dev_geometry = nullptr;
+        other.m_geometryCount = 0;
+        other.dev_materials = nullptr;
+        other.m_materialCount = 0;
+		other.dev_triangles = nullptr;
+		other.m_triangleCount = 0;
+        other.dev_blasNodes = nullptr;
+        other.m_blasNodeCount = 0;
+		other.dev_tlasNodes = nullptr;
+		other.m_tlasNodeCount = 0;
+    }
+
+    return *this;
+}
+
+Scene::Scene(Scene&& other) noexcept :
+    dev_geometry(other.dev_geometry),
+    m_geometryCount(other.m_geometryCount),
+    dev_materials(other.dev_materials),
+    m_materialCount(other.m_materialCount),
+    dev_triangles(other.dev_triangles),
+    m_triangleCount(other.m_triangleCount),
+    dev_blasNodes(other.dev_blasNodes),
+    m_blasNodeCount(other.m_blasNodeCount),
+	dev_tlasNodes(other.dev_tlasNodes),
+	m_tlasNodeCount(other.m_tlasNodeCount),
+    m_textures(std::move(other.m_textures)),
+	m_textureArrays(std::move(other.m_textureArrays))
+{
+    other.dev_geometry = nullptr;
+    other.m_geometryCount = 0;
+    other.dev_materials = nullptr;
+    other.m_materialCount = 0;
+    other.dev_triangles = nullptr;
+    other.m_triangleCount = 0;
+    other.dev_blasNodes = nullptr;
+    other.m_blasNodeCount = 0;
+    other.dev_tlasNodes = nullptr;
+    other.m_tlasNodeCount = 0;
+}
+
+void Scene::freeDeviceMemory()
 {
     if (dev_geometry) {
         cudaFree(dev_geometry);
@@ -58,52 +230,20 @@ Scene::~Scene()
         cudaFree(dev_blasNodes);
         dev_blasNodes = nullptr;
     }
-}
 
-Scene& Scene::operator=(Scene&& other) noexcept
-{
-    if (this != &other) {
-        if (dev_geometry) {
-            cudaFree(dev_geometry);
+    for (auto texture : m_textures) {
+        if (texture) {
+            cudaDestroyTextureObject(texture);
         }
-        if (dev_materials) {
-            cudaFree(dev_materials);
-        }
-        if (dev_triangles) {
-            cudaFree(dev_triangles);
-        }
-        if (dev_blasNodes) {
-            cudaFree(dev_blasNodes);
-        }
-
-        dev_geometry = other.dev_geometry;
-        dev_materials = other.dev_materials;
-        dev_triangles = other.dev_triangles;
-		dev_blasNodes = other.dev_blasNodes;
-
-        other.dev_geometry = nullptr;
-        other.dev_materials = nullptr;
-		other.dev_triangles = nullptr;
-        other.dev_blasNodes = nullptr;
     }
+    m_textures.clear();
 
-    return *this;
-}
-
-Scene::Scene(Scene&& other) noexcept :
-    dev_geometry(other.dev_geometry),
-    m_geometryCount(other.m_geometryCount),
-    dev_materials(other.dev_materials),
-    m_materialCount(other.m_materialCount),
-    dev_triangles(other.dev_triangles),
-    m_triangleCount(other.m_triangleCount),
-    dev_blasNodes(other.dev_blasNodes),
-    m_blasNodeCount(other.m_blasNodeCount)
-{
-    other.dev_geometry = nullptr;
-    other.dev_materials = nullptr;
-    other.dev_triangles = nullptr;
-    other.dev_blasNodes = nullptr;
+    for (auto textureArray : m_textureArrays) {
+        if (textureArray) {
+            cudaFreeArray(textureArray);
+        }
+    }
+    m_textureArrays.clear();
 }
 
 std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath)
@@ -130,8 +270,6 @@ std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath)
 
 std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath)
 {
-    std::unique_ptr<Scene> scene = std::make_unique<Scene>();
-
     std::ifstream file(filepath);
     if (!file.is_open()) {
         throw std::runtime_error("Failed to open scene file: " + filepath);
@@ -233,7 +371,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath)
     auto it = std::partition(geometry.begin(), geometry.end(), [materials](const Geom& geom) {
         return geom.materialid < materials.size() && geom.materialid >= 0 && materials[geom.materialid].emittance > 0.0f;
         });
-    scene->m_lightCount = std::distance(geometry.begin(), it);
+    size_t lightCount = std::distance(geometry.begin(), it);
 
     // Build TLAS
     std::vector<TLASNode> tlasNodes;
@@ -249,42 +387,10 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath)
 
     BVHBuilder::buildTLAS(geometryBuildData, 0, geometryBuildData.size(), tlasNodes);
 
-    // Allocate geometry
-    if (!geometry.empty()) {
-        if (cudaMalloc((void**)&scene->dev_geometry, geometry.size() * sizeof(Geom)) != cudaSuccess) {
+    std::vector<Triangle> triangles;
+	std::vector<BLASNode> blasNodes;
 
-            throw std::runtime_error("CUDA Failed to allocate dev_geometry");
-        }
-        if (cudaMemcpy(scene->dev_geometry, geometry.data(), geometry.size() * sizeof(Geom), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy geometry to dev_geometry");
-        }
-    }
-
-    // Allocate materials
-    if (!materials.empty()) {
-        if (cudaMalloc((void**)&scene->dev_materials, materials.size() * sizeof(Material)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_materials");
-        }
-        if (cudaMemcpy(scene->dev_materials, materials.data(), materials.size() * sizeof(Material), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy materials to dev_materials");
-        }
-    }
-
-    // Allocate TLAS nodes
-    if (!tlasNodes.empty()) {
-        if (cudaMalloc((void**)&scene->dev_tlasNodes, tlasNodes.size() * sizeof(TLASNode)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_tlasNodes");
-        }
-        if (cudaMemcpy(scene->dev_tlasNodes, tlasNodes.data(), tlasNodes.size() * sizeof(TLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy TLAS nodes to dev_tlasNodes");
-        }
-    }
-
-    scene->m_geometryCount = geometry.size();
-    scene->m_materialCount = materials.size();
-	scene->m_tlasNodeCount = tlasNodes.size();
-
-    return scene;
+    return std::make_unique<Scene>(geometry, lightCount, triangles, blasNodes, tlasNodes, materials);
 }
 
 void parseGltfNodeRecursive(
@@ -322,10 +428,13 @@ void parseGltfNodeRecursive(
 
             // Get position accessor
             int positionAccessorIdx = -1;
+            int uvAccessorIdx = -1;
             for (uint32_t a = 0; a < prim.attributes_count; a++) {
                 if (strcmp(prim.attributes[a].key.data, "POSITION") == 0) {
                     positionAccessorIdx = prim.attributes[a].value;
-                    break;
+                }
+                else if (strcmp(prim.attributes[a].key.data, "TEXCOORD_0") == 0) {
+                    uvAccessorIdx = prim.attributes[a].value;
                 }
             }
 
@@ -342,12 +451,32 @@ void parseGltfNodeRecursive(
             uint32_t posStride = posView.byte_stride > 0 ? posView.byte_stride : sizeof(float) * 3;
             uint32_t vertexCount = posAccessor.count;
 
+			const uint8_t* uvBufferData = nullptr;
+			uint32_t uvStride = 0;
+			bool hasUVs = false;
+
+            if (uvAccessorIdx >= 0 && uvAccessorIdx < model.accessors_count) {
+                const tg3_accessor& uvAccessor = model.accessors[uvAccessorIdx];
+                const tg3_buffer_view& uvView = model.buffer_views[uvAccessor.buffer_view];
+                const tg3_buffer& uvBuffer = model.buffers[uvView.buffer];
+                
+                uvBufferData = uvBuffer.data.data + uvView.byte_offset + uvAccessor.byte_offset;
+				uvStride = uvView.byte_stride > 0 ? uvView.byte_stride : sizeof(float) * 2;
+				hasUVs = uvAccessor.count == vertexCount;
+            }
+
             // Extract raw local vertices into a temporary vector
             std::vector<glm::vec3> localVertices(vertexCount);
+			std::vector<glm::vec2> localUVs(vertexCount, glm::vec2(0.0f));
+
             for (uint32_t v = 0; v < vertexCount; v++) {
                 const float* rawVertexFloats = reinterpret_cast<const float*>(posBufferData + (v * posStride));
-
                 localVertices[v] = glm::vec3(rawVertexFloats[0], rawVertexFloats[1], rawVertexFloats[2]);
+
+                if(hasUVs) {
+                    const float* rawUVFloats = reinterpret_cast<const float*>(uvBufferData + (v * uvStride));
+                    localUVs[v] = glm::vec2(rawUVFloats[0], rawUVFloats[1]);
+				}
             }
 
             // Assemble triangles
@@ -384,6 +513,9 @@ void parseGltfNodeRecursive(
 					tri.v0 = localVertices[i0];
 					tri.v1 = localVertices[i1];
 					tri.v2 = localVertices[i2];
+					tri.uv0 = localUVs[i0];
+					tri.uv1 = localUVs[i1];
+					tri.uv2 = localUVs[i2];
                     outTriangles.push_back(tri);
                 }
             }
@@ -395,6 +527,9 @@ void parseGltfNodeRecursive(
 					tri.v0 = localVertices[v + 0];
 					tri.v1 = localVertices[v + 1];
 					tri.v2 = localVertices[v + 2];
+					tri.uv0 = localUVs[v + 0];
+					tri.uv1 = localUVs[v + 1];
+					tri.uv2 = localUVs[v + 2];
 					outTriangles.push_back(tri);
                 }
             }
@@ -422,16 +557,42 @@ void parseGltfNodeRecursive(
     }
 }
 
-void parseGltfMaterials(const tg3_model& model, std::vector<Material>& outMaterials)
+void parseGltfMaterials(const tg3_model& model, const std::string& baseDir, std::vector<Material>& outMaterials, std::vector<cudaTextureObject_t>& outTextures, std::vector<cudaArray_t>& outTextureArrays)
 {
+    // Load all images as textures first
+    if (model.images_count > 0) {
+        outTextures.resize(model.images_count, 0);
+		outTextureArrays.resize(model.images_count, nullptr);
+
+        for (uint32_t i = 0; i < model.images_count; i++) {
+            if(model.images[i].uri.data == nullptr) {
+                std::cerr << "Image " << i << " has no URI, skipping." << std::endl;
+                continue;
+			}
+            std::string fullImagePath = baseDir + model.images[i].uri.data;
+            
+            bool success = Texture::LoadTexture(
+                fullImagePath.c_str(),
+                outTextures[i],
+                outTextureArrays[i]
+            );
+
+            if(!success) {
+                std::cerr << "Failed to load texture: " << fullImagePath << std::endl;
+			}
+        }
+    }
+
+    // Parse materials and assign texture handles
     for (uint32_t i = 0; i < model.materials_count; ++i) {
         const tg3_material& gltfMat = model.materials[i];
         Material mat{};
 
         mat.type = MaterialType::PbrMetallicRoughness;
+        mat.albedoTexture = 0;
+		mat.pbr.metallicRoughnessTexture = 0;
 
         float emissiveSum = gltfMat.emissive_factor[0] + gltfMat.emissive_factor[1] + gltfMat.emissive_factor[2];
-        
         if (emissiveSum > 0.0f) {
             mat.albedo = glm::vec3(
                 gltfMat.emissive_factor[0],
@@ -442,19 +603,45 @@ void parseGltfMaterials(const tg3_model& model, std::vector<Material>& outMateri
             outMaterials.push_back(mat);
             continue;
         }
+
         mat.albedo = glm::vec3(
             gltfMat.pbr_metallic_roughness.base_color_factor[0],
             gltfMat.pbr_metallic_roughness.base_color_factor[1],
             gltfMat.pbr_metallic_roughness.base_color_factor[2]
         );
         mat.emittance = 0.0f;
-
 		mat.pbr.roughness = gltfMat.pbr_metallic_roughness.roughness_factor;
 		mat.pbr.metallic = gltfMat.pbr_metallic_roughness.metallic_factor;
 
         if (mat.pbr.roughness > 0.99f && mat.pbr.metallic == 0.0f && mat.pbr.transmission == 0.0f) {
             mat.type = MaterialType::OpaqueDiffuse;
         }
+
+        if (gltfMat.pbr_metallic_roughness.base_color_texture.index >= 0 && 
+            gltfMat.pbr_metallic_roughness.base_color_texture.index < model.textures_count) {
+			int texIdx = gltfMat.pbr_metallic_roughness.base_color_texture.index;
+            const tg3_texture& textureRef = model.textures[texIdx];
+
+            if(textureRef.source >= 0 && textureRef.source < outTextures.size()) {
+                mat.albedoTexture = outTextures[textureRef.source];
+            }
+            else {
+                std::cerr << "Material " << i << " has invalid base color texture index: " << textureRef.source << std::endl;
+			}
+        }
+
+        if(gltfMat.pbr_metallic_roughness.metallic_roughness_texture.index >= 0 && 
+            gltfMat.pbr_metallic_roughness.metallic_roughness_texture.index < model.textures_count) {
+            int texIdx = gltfMat.pbr_metallic_roughness.metallic_roughness_texture.index;
+            const tg3_texture& textureRef = model.textures[texIdx];
+
+            if (textureRef.source >= 0 && textureRef.source < outTextures.size()) {
+                mat.pbr.metallicRoughnessTexture = outTextures[textureRef.source];
+            }
+            else {
+				std::cerr << "Material " << i << " has invalid metallic-roughness texture index: " << textureRef.source << std::endl;
+            }
+		}
 
         outMaterials.push_back(mat);
     }
@@ -491,8 +678,15 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
     std::vector<Material> materials;
 	std::vector<Geom> geometry;
 	std::vector<Triangle> triangles;
+	std::vector<cudaTextureObject_t> textures;
+	std::vector<cudaArray_t> textureArrays;
 
-	parseGltfMaterials(model, materials);
+    std::string baseDir = "";
+    size_t lastSlash = filepath.find_last_of("/\\");
+    if (lastSlash != std::string::npos) {
+        baseDir = filepath.substr(0, lastSlash + 1);
+    }
+	parseGltfMaterials(model, baseDir, materials, textures, textureArrays);
 
     // Parse geometry from default scene
 
@@ -551,7 +745,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
     auto it = std::partition(geometry.begin(), geometry.end(), [materials](const Geom& geom) {
         return geom.materialid < materials.size() && geom.materialid >= 0 && materials[geom.materialid].emittance > 0.0f;
         });
-    scene->m_lightCount = std::distance(geometry.begin(), it);
+    int lightCount = std::distance(geometry.begin(), it);
 
     // Build TLAS
     std::vector<TLASNode> tlasNodes;
@@ -567,74 +761,19 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
 
     BVHBuilder::buildTLAS(geometryBuildData, 0, geometryBuildData.size(), tlasNodes);
 
-    // Allocate geometry
-    if (!geometry.empty()) {
-        if (cudaMalloc((void**)&scene->dev_geometry, geometry.size() * sizeof(Geom)) != cudaSuccess) {
-
-            throw std::runtime_error("CUDA Failed to allocate dev_geometry");
-		}
-        if (cudaMemcpy(scene->dev_geometry, geometry.data(), geometry.size() * sizeof(Geom), cudaMemcpyHostToDevice) != cudaSuccess) {
-			throw std::runtime_error("CUDA Failed to memcopy geometry to dev_geometry");
-        }
-    }
-
-    // Allocate materials
-    if(!materials.empty()) {
-        if (cudaMalloc((void**)&scene->dev_materials, materials.size() * sizeof(Material)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_materials");
-        }
-        if (cudaMemcpy(scene->dev_materials, materials.data(), materials.size() * sizeof(Material), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy materials to dev_materials");
-		}
-	}
-
-    // Allocate triangles
-    if (!triangles.empty()) {
-        if (cudaMalloc((void**)&scene->dev_triangles, sortedTriangles.size() * sizeof(Triangle)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_triangles");
-        }
-        if(cudaMemcpy(scene->dev_triangles, sortedTriangles.data(), sortedTriangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy triangles to dev_triangles");
-		}
-    }
-
-	// Allocate BLAS nodes
-    if (!blasNodes.empty()) {
-        if (cudaMalloc((void**)&scene->dev_blasNodes, blasNodes.size() * sizeof(BLASNode)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_blasNodes");
-        }
-        if (cudaMemcpy(scene->dev_blasNodes, blasNodes.data(), blasNodes.size() * sizeof(BLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy BLAS nodes to dev_blasNodes");
-        }
-	}
-
-	// Allocate TLAS nodes
-    if(!tlasNodes.empty()) {
-        if (cudaMalloc((void**)&scene->dev_tlasNodes, tlasNodes.size() * sizeof(TLASNode)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_tlasNodes");
-        }
-        if (cudaMemcpy(scene->dev_tlasNodes, tlasNodes.data(), tlasNodes.size() * sizeof(TLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy TLAS nodes to dev_tlasNodes");
-        }
-	}
-
-    scene->m_geometryCount = geometry.size();
-	scene->m_materialCount = materials.size();
-	scene->m_triangleCount = sortedTriangles.size();
-	scene->m_blasNodeCount = blasNodes.size();
-	scene->m_tlasNodeCount = tlasNodes.size();
-
-    return scene;
+    return std::make_unique<Scene>(geometry, lightCount, sortedTriangles, blasNodes, tlasNodes, materials, textures, textureArrays);
 }
 
 std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
 {
-    // Create scene
-    std::unique_ptr<Scene> scene = std::make_unique<Scene>();
-
 	tinyobj::ObjReaderConfig readerConfig;
 
-	std::filesystem::path path(filepath);
+    std::filesystem::path path(filepath);
+    std::string baseDir = path.parent_path().string();
+    if (!baseDir.empty()) {
+        baseDir += "/";
+    }
+
 	readerConfig.mtl_search_path = path.parent_path().string();
     readerConfig.triangulate = true;
 
@@ -654,6 +793,10 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
 	auto& shapes = reader.GetShapes();
 	auto& objMaterials = reader.GetMaterials();
 
+    std::vector<cudaTextureObject_t> loadedTextures;
+    std::vector<cudaArray_t> loadedTextureArrays;
+    std::unordered_map<std::string, cudaTextureObject_t> textureCache;
+
     std::vector<Material> materials;
     std::vector<Geom> geometry;
     std::vector<Triangle> triangles;
@@ -666,6 +809,31 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
 		mat.blinnPhong.specularColor = glm::vec3(objMaterial.specular[0], objMaterial.specular[1], objMaterial.specular[2]);
 		mat.blinnPhong.exponent = glm::clamp(objMaterial.shininess, 0.0f, 1000.0f);
         mat.ior = glm::max(1.0f, objMaterial.ior);
+
+        mat.albedoTexture = 0;
+
+        if (!objMaterial.diffuse_texname.empty()) {
+            std::string fullTexPath = baseDir + objMaterial.diffuse_texname;
+
+            auto iter = textureCache.find(fullTexPath);
+            if (iter != textureCache.end()) {
+                // Texture already loaded by another material, reuse the index
+                mat.albedoTexture = iter->second;
+            }
+            else {
+                // New unique texture, load via your helper class
+                cudaTextureObject_t textureObject = 0;
+                cudaArray_t textureArray = nullptr;
+
+                if (Texture::LoadTexture(fullTexPath.c_str(), textureObject, textureArray)) {
+                    loadedTextures.push_back(textureObject);
+                    loadedTextureArrays.push_back(textureArray);
+                    textureCache[fullTexPath] = textureObject;
+
+                    mat.albedoTexture = textureObject;
+                }
+            }
+        }
 
 		float emissiveSum = objMaterial.emission[0] + objMaterial.emission[1] + objMaterial.emission[2];
         if(emissiveSum > 0.0f) {
@@ -720,7 +888,8 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
 		glass.albedo = glm::vec3(1.0f);
 		glass.ior = 1.5f;
 		glass.blinnPhong.bRefractive = true;
-        materials.push_back(glass);
+		glass.albedoTexture = -1;
+        materials.push_back(diffuse);
     }
 
     // Parse meshes
@@ -742,6 +911,15 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
                 attrib.vertices[3 * size_t(idx0.vertex_index) + 1],
                 attrib.vertices[3 * size_t(idx0.vertex_index) + 2]
 			);
+            if(idx0.texcoord_index >= 0) {
+                tri.uv0 = glm::vec2(
+                    attrib.texcoords[2 * size_t(idx0.texcoord_index) + 0],
+                    attrib.texcoords[2 * size_t(idx0.texcoord_index) + 1]
+                );
+			}
+            else {
+				tri.uv0 = glm::vec2(0.0f, 0.0f);
+            }
 
 			tinyobj::index_t idx1 = shape.mesh.indices[indexOffset + 1];
             tri.v1 = glm::vec3(
@@ -749,6 +927,15 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
                 attrib.vertices[3 * size_t(idx1.vertex_index) + 1],
                 attrib.vertices[3 * size_t(idx1.vertex_index) + 2]
             );
+            if(idx1.texcoord_index >= 0) {
+                tri.uv1 = glm::vec2(
+                    attrib.texcoords[2 * size_t(idx1.texcoord_index) + 0],
+                    attrib.texcoords[2 * size_t(idx1.texcoord_index) + 1]
+                );
+            }
+            else {
+                tri.uv1 = glm::vec2(0.0f, 0.0f);
+			}
 
 			tinyobj::index_t idx2 = shape.mesh.indices[indexOffset + 2];
             tri.v2 = glm::vec3(
@@ -756,11 +943,19 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
                 attrib.vertices[3 * size_t(idx2.vertex_index) + 1],
                 attrib.vertices[3 * size_t(idx2.vertex_index) + 2]
             );
+            if (idx2.texcoord_index >= 0) {
+                tri.uv2 = glm::vec2(
+                    attrib.texcoords[2 * size_t(idx2.texcoord_index) + 0],
+                    attrib.texcoords[2 * size_t(idx2.texcoord_index) + 1]
+                );
+            }
+            else {
+                tri.uv2 = glm::vec2(0.0f, 0.0f);
+			}
 
             triangles.push_back(tri);
 
 			int objMaterialId = shape.mesh.material_ids[f];
-            objMaterialId = 0;
 			geom.materialid = (objMaterialId >= 0 && objMaterialId < materials.size()) ? objMaterialId : 0;
 
 			indexOffset += fv;
@@ -792,8 +987,13 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
 			triangleBuildData[t].triangleIndex = geom.triangleOffset + t;
         }
 
+		geom.triangleOffset = sortedTriangles.size();
+
         std::vector<BLASNode> geomBlasNodes;
 		BVHBuilder::buildBLAS(triangleBuildData, 0, triangleBuildData.size(), geomBlasNodes, triangles, sortedTriangles);
+       
+		geom.triangleCount = sortedTriangles.size() - geom.triangleOffset;
+
         int nodeOffsetStart = blasNodes.size();
         for (size_t n = 0; n < geomBlasNodes.size(); n++) {
             BLASNode& node = geomBlasNodes[n];
@@ -809,7 +1009,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
     auto it = std::partition(geometry.begin(), geometry.end(), [materials](const Geom& geom) {
         return geom.materialid < materials.size() && geom.materialid >= 0 && materials[geom.materialid].emittance > 0.0f;
         });
-    scene->m_lightCount = std::distance(geometry.begin(), it);
+    int lightCount = std::distance(geometry.begin(), it);
 
     // Build TLAS
     std::vector<TLASNode> tlasNodes;
@@ -825,57 +1025,5 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
 
 	BVHBuilder::buildTLAS(geometryBuildData, 0, geometryBuildData.size(), tlasNodes);
 
-    // Copy to GPU
-    if (!geometry.empty()) {
-        if (cudaMalloc((void**)&scene->dev_geometry, geometry.size() * sizeof(Geom)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_geometry");
-        }
-        if (cudaMemcpy(scene->dev_geometry, geometry.data(), geometry.size() * sizeof(Geom), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy geometry to dev_geometry");
-        }
-	}
-
-    if(!materials.empty()) {
-        if (cudaMalloc((void**)&scene->dev_materials, materials.size() * sizeof(Material)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_materials");
-        }
-        if (cudaMemcpy(scene->dev_materials, materials.data(), materials.size() * sizeof(Material), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy materials to dev_materials");
-        }
-	}
-
-    if (!sortedTriangles.empty()) {
-        if (cudaMalloc((void**)&scene->dev_triangles, sortedTriangles.size() * sizeof(Triangle)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_triangles");
-        }
-        if (cudaMemcpy(scene->dev_triangles, sortedTriangles.data(), sortedTriangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy triangles to dev_triangles");
-        }
-    }
-
-    if (!blasNodes.empty()) {
-        if (cudaMalloc((void**)&scene->dev_blasNodes, blasNodes.size() * sizeof(BLASNode)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_blasNodes");
-        }
-        if (cudaMemcpy(scene->dev_blasNodes, blasNodes.data(), blasNodes.size() * sizeof(BLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy BLAS nodes to dev_blasNodes");
-        }
-    }
-
-    if(!tlasNodes.empty()) {
-        if (cudaMalloc((void**)&scene->dev_tlasNodes, tlasNodes.size() * sizeof(TLASNode)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_tlasNodes");
-        }
-        if (cudaMemcpy(scene->dev_tlasNodes, tlasNodes.data(), tlasNodes.size() * sizeof(TLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy TLAS nodes to dev_tlasNodes");
-        }
-	}
-
-	scene->m_geometryCount = geometry.size();
-	scene->m_materialCount = materials.size();
-	scene->m_triangleCount = sortedTriangles.size();
-	scene->m_blasNodeCount = blasNodes.size();
-	scene->m_tlasNodeCount = tlasNodes.size();
-
-    return scene;
+    return std::make_unique<Scene>(geometry, lightCount, sortedTriangles, blasNodes, tlasNodes, materials, loadedTextures, loadedTextureArrays);
 }
