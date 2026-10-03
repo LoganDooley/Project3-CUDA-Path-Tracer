@@ -12,7 +12,8 @@
 #include "kernel.h"
 
 Renderer::Renderer() :
-    m_renderSettings(RenderSettings{})
+    m_renderSettings(RenderSettings{}),
+    m_svgfManager(SVGFManager())
 {
 
 }
@@ -83,8 +84,8 @@ void Renderer::resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
 
     cudaMemset(dev_accumulatedColor, 0, getPixelCount() * sizeof(glm::vec3));
 
-    if (m_svgfManager != nullptr) {
-        m_svgfManager->resize(m_extent.width, m_extent.height);
+    if (m_renderSettings.bSVGFEnabled) {
+        m_svgfManager.resize(m_extent.width, m_extent.height);
     }
 }
 
@@ -122,8 +123,8 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             scene,
             currentActivePathCount);
 
-        if (i == 0 && m_svgfManager != nullptr) {
-            m_svgfManager->captureGBuffer(dev_pathStates, dev_intersectionData, currentActivePathCount, camera, scene);
+        if (i == 0 && m_renderSettings.bSVGFEnabled) {
+            m_svgfManager.captureGBuffer(dev_pathStates, dev_intersectionData, currentActivePathCount, camera, scene);
         }
 
         if (m_renderSettings.bSortPathsByMaterial) {
@@ -145,7 +146,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             currentActivePathCount,
             m_cudaSurfaceObject,
             dev_accumulatedColor,
-            m_svgfManager != nullptr ? m_svgfManager->dev_pingBuffer : nullptr,
+            m_renderSettings.bSVGFEnabled ? m_svgfManager.dev_pingBuffer : nullptr,
             dev_sampleCounts,
             m_extent.width,
             i,
@@ -162,23 +163,22 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             currentActivePathCount, 
             m_cudaSurfaceObject, 
             dev_accumulatedColor,
-            m_svgfManager != nullptr ? m_svgfManager->dev_pingBuffer : nullptr,
-            dev_sampleCounts, 
+            m_renderSettings.bSVGFEnabled ? m_svgfManager.dev_pingBuffer : nullptr,
+            dev_sampleCounts,
             m_extent.width);
     }
 
-    if (m_svgfManager != nullptr) {
-        m_svgfManager->executeTemporalAccumulation();
+    if (m_renderSettings.bSVGFEnabled) {
+        // Run svgf
+        m_svgfManager.executeTemporalAccumulation();
 
-        m_svgfManager->executeVarianceEstimation();
+        m_svgfManager.executeVarianceEstimation();
 
-        m_svgfManager->executeAtrousFilteringPipeline();
+        m_svgfManager.executeAtrousFilteringPipeline();
 
-        //m_svgfManager->debugMotionVectors(m_cudaSurfaceObject);
-        m_svgfManager->debugIlluminance(m_cudaSurfaceObject);
-        //m_svgfManager->debugVariance(m_cudaSurfaceObject);
+        m_svgfManager.debugIlluminance(m_cudaSurfaceObject);
 
-        m_svgfManager->swapBuffers();
+        m_svgfManager.swapBuffers();
     }
 
     m_frameIndex++;
@@ -240,27 +240,31 @@ void Renderer::drawRenderSettingsImGui(Camera& camera)
     if (ImGui::Checkbox("Use MSAA", &m_renderSettings.bMSAAEnabled)) {
 		// Don't allow MSAA to be used with SVGF
         if(m_renderSettings.bMSAAEnabled && m_renderSettings.bSVGFEnabled) {
-            // Turn off SVGF
-            m_svgfManager = nullptr;
+            // Turn off SVGF and free its buffers, keeping its settings
+            m_svgfManager.resize(0, 0);
             m_renderSettings.bSVGFEnabled = false;
 		}
 	}
     if (ImGui::Checkbox("Use SVGF:", &m_renderSettings.bSVGFEnabled)) {
-        if(m_renderSettings.bSVGFEnabled && m_svgfManager == nullptr) {
-            m_svgfManager = std::make_unique<SVGFManager>();
-            m_svgfManager->resize(m_extent.width, m_extent.height);
+        if(m_renderSettings.bSVGFEnabled) {
+            m_svgfManager.resize(m_extent.width, m_extent.height);
             // Don't allow MSAA to be used with SVGF
 			m_renderSettings.bMSAAEnabled = false;
             // Reset lens radius to 0 to disable DOF
             camera.m_lensRadius = 0.0f;
             camera.m_hasChanged = true;
         }
-        else if(!m_renderSettings.bSVGFEnabled) {
-            m_svgfManager = nullptr;
+        else {
+            // Free SVGF buffers, keeping its settings
+            m_svgfManager.resize(0, 0);
 		}
     }
     ImGui::Checkbox("Use Stream Compaction:", &m_renderSettings.bStreamCompactionEnabled);
 	ImGui::Checkbox("Sort Paths by Material:", &m_renderSettings.bSortPathsByMaterial);
+    ImGui::Text("SVGF Settings:");
+    ImGui::BeginDisabled(!m_renderSettings.bSVGFEnabled);
+    m_svgfManager.drawSettingsImGui();
+    ImGui::EndDisabled();
     ImGui::Text("Camera Settings:");
     ImGui::BeginDisabled(m_renderSettings.bSVGFEnabled);
     if (ImGui::SliderFloat("Lens Radius", &camera.m_lensRadius, 0.0f, 0.25f)) {

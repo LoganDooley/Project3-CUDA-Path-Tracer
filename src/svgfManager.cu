@@ -5,6 +5,8 @@
 
 #include <cuda_runtime.h>
 
+#include "imgui.h"
+
 #include <iostream>
 
 #define CUDA_CHECK(ans) { cudaAssert((ans), __FILE__, __LINE__); }
@@ -122,6 +124,8 @@ __global__ void kernTemporalAccumulation(
 	glm::vec2* dev_moments,
 	unsigned int* dev_historyLength,
 	const unsigned int* dev_historyLengthPrev,
+	float colorAlphaMin,
+	float momentsAlphaMin,
 	int width, int height)
 {
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -230,8 +234,6 @@ __global__ void kernTemporalAccumulation(
 		unsigned int updatedHistoryCount = glm::min(historicalCount + 1, 32U);
 		dev_historyLength[pixelIndex] = updatedHistoryCount;
 
-		const float colorAlphaMin = 0.2f;
-		const float momentsAlphaMin = 0.2f;
 		float colorAlpha = glm::max(1.0f / (float)updatedHistoryCount, colorAlphaMin);
 		float momentsAlpha = glm::max(1.0f / (float)updatedHistoryCount, momentsAlphaMin);
 
@@ -741,6 +743,9 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 		other.dev_variancePing = nullptr;
 		other.dev_variancePong = nullptr;
 		other.dev_prefilteredVariance = nullptr;
+
+		m_prevViewProj = other.m_prevViewProj;
+		m_svgfSettings = other.m_svgfSettings;
 	}
 
 	return *this;
@@ -765,9 +770,12 @@ void SVGFManager::resize(int width, int height)
 	}
 
 	freeBuffers();
-	
+
 	m_width = width;
 	m_height = height;
+
+	// Old camera matrix is stale once history buffers are reallocated
+	m_prevViewProj.reset();
 
 	if (m_width > 0 && m_height > 0) {
 		allocateBuffers();
@@ -827,6 +835,8 @@ void SVGFManager::executeTemporalAccumulation()
 		dev_moments,
 		dev_gBuffer_historyLength,
 		dev_gBuffer_historyLengthPrev,
+		m_svgfSettings.colorAlpha,
+		m_svgfSettings.momentsAlpha,
 		m_width,
 		m_height
 		);
@@ -861,14 +871,15 @@ void SVGFManager::executeAtrousFilteringPipeline() {
 	dim3 blockSize(16, 16);
 	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
 
-	// SVGF Tuning coefficients
-	float sigmaLuminance = 4.0f;
-	float sigmaNormal = 128.0f;
-	float sigmaDepth = 1.0f;
+	size_t numPixels = static_cast<size_t>(m_width) * m_height;
 
-	const int iterations = 5;
+	if (m_svgfSettings.atrousIterations <= 0) {
+		// No wavelet iterations, so the temporally integrated color becomes next frame's color history
+		CUDA_CHECK(cudaMemcpy(dev_illuminationPrev, dev_pingBuffer, numPixels * sizeof(glm::vec4), cudaMemcpyDeviceToDevice));
+		return;
+	}
 
-	for (int i = 0; i < iterations; ++i) {
+	for (int i = 0; i < m_svgfSettings.atrousIterations; ++i) {
 		int stride = 1 << i;
 
 		// Prefilter variance
@@ -888,16 +899,15 @@ void SVGFManager::executeAtrousFilteringPipeline() {
 			dev_variancePong,
 			dev_pongBuffer,
 			stride,
-			sigmaLuminance,
-			sigmaNormal,
-			sigmaDepth,
+			m_svgfSettings.sigmaLuminance,
+			m_svgfSettings.sigmaNormal,
+			m_svgfSettings.sigmaDepth,
 			m_width,
 			m_height
 			);
 
 		if (i == 0) {
 			// Save first iteration of wavelet to next frames color history
-			size_t numPixels = m_width * m_height;
 			CUDA_CHECK(cudaMemcpy(dev_illuminationPrev, dev_pongBuffer, numPixels * sizeof(glm::vec4), cudaMemcpyDeviceToDevice));
 
 		}
@@ -937,6 +947,16 @@ void SVGFManager::debugVariance(cudaSurfaceObject_t surface)
 	dim3 blockSize(16, 16);
 	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
 	kernDebugVariance << <gridSize, blockSize >> > (dev_variancePing, surface, m_width, m_height);
+}
+
+void SVGFManager::drawSettingsImGui()
+{
+	ImGui::SliderFloat("Color Alpha", &m_svgfSettings.colorAlpha, 0.01f, 1.0f);
+	ImGui::SliderFloat("Moments Alpha", &m_svgfSettings.momentsAlpha, 0.01f, 1.0f);
+	ImGui::SliderFloat("Sigma Luminance", &m_svgfSettings.sigmaLuminance, 0.1f, 16.0f);
+	ImGui::SliderFloat("Sigma Normal", &m_svgfSettings.sigmaNormal, 1.0f, 256.0f);
+	ImGui::SliderFloat("Sigma Depth", &m_svgfSettings.sigmaDepth, 0.01f, 4.0f);
+	ImGui::SliderInt("A-trous Iterations", &m_svgfSettings.atrousIterations, 0, 8);
 }
 
 void SVGFManager::allocateBuffers()

@@ -6,6 +6,7 @@
 #include "scene.h"
 
 #include "camera.h"
+#include "svgfSettings.h"
 #include <optional>
 
 __global__ void kernCaptureGBuffer(
@@ -31,6 +32,8 @@ __global__ void kernTemporalAccumulation(
 	glm::vec2* dev_moments,
 	unsigned int* dev_historyLength,
 	const unsigned int* dev_historyLengthPrev,
+	float colorAlphaMin,
+	float momentsAlphaMin,
 	int width, int height);
 
 class SVGFManager {
@@ -70,6 +73,8 @@ public:
 
 	void debugVariance(cudaSurfaceObject_t surface);
 
+	void drawSettingsImGui();
+
 	// Current G Buffers
 	glm::vec4* dev_gBuffer_normalDepth = nullptr;
 	glm::vec2* dev_gBuffer_motionVectors = nullptr;
@@ -100,4 +105,6 @@ private:
 	int m_height = 0;
 
 	std::optional<glm::mat4> m_prevViewProj;
+
+	SVGFSettings m_svgfSettings;
 };

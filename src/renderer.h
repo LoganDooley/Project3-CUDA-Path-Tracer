@@ -53,5 +53,5 @@ private:
 
 	int m_frameIndex = 0;
 
-	std::unique_ptr<SVGFManager> m_svgfManager = nullptr;
+	SVGFManager m_svgfManager;
 };
