@@ -888,8 +888,8 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
 		glass.albedo = glm::vec3(1.0f);
 		glass.ior = 1.5f;
 		glass.blinnPhong.bRefractive = true;
-		glass.albedoTexture = -1;
-        materials.push_back(diffuse);
+		glass.albedoTexture = 0;
+        materials.push_back(glass);
     }
 
     // Parse meshes

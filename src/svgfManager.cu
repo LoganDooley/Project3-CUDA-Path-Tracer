@@ -230,11 +230,14 @@ __global__ void kernTemporalAccumulation(
 		unsigned int updatedHistoryCount = glm::min(historicalCount + 1, 32U);
 		dev_historyLength[pixelIndex] = updatedHistoryCount;
 
-		float alpha = glm::max(1.0f / (float)updatedHistoryCount, 0.05f);
+		const float colorAlphaMin = 0.2f;
+		const float momentsAlphaMin = 0.2f;
+		float colorAlpha = glm::max(1.0f / (float)updatedHistoryCount, colorAlphaMin);
+		float momentsAlpha = glm::max(1.0f / (float)updatedHistoryCount, momentsAlphaMin);
 
 		// Blend color and moments
-		dev_integratedColor[pixelIndex] = glm::mix(accumulatedColor, currentColor, alpha);
-		dev_moments[pixelIndex] = glm::mix(accumulatedMoments, currentMoments, alpha);
+		dev_integratedColor[pixelIndex] = glm::mix(accumulatedColor, currentColor, colorAlpha);
+		dev_moments[pixelIndex] = glm::mix(accumulatedMoments, currentMoments, momentsAlpha);
 	}
 	else {
 		// Failed to remap, reset to 1 spp
@@ -753,9 +756,6 @@ void SVGFManager::swapBuffers()
 	std::swap(dev_gBuffer_normalDepth, dev_gBuffer_normalDepthPrev);
 	std::swap(dev_moments, dev_momentsPrev);
 	std::swap(dev_gBuffer_historyLength, dev_gBuffer_historyLengthPrev);
-
-	size_t numPixels = m_width * m_height;
-	cudaMemcpy(dev_illuminationPrev, dev_pingBuffer, numPixels * sizeof(glm::vec4), cudaMemcpyDeviceToDevice);
 }
 
 void SVGFManager::resize(int width, int height)
@@ -894,6 +894,13 @@ void SVGFManager::executeAtrousFilteringPipeline() {
 			m_width,
 			m_height
 			);
+
+		if (i == 0) {
+			// Save first iteration of wavelet to next frames color history
+			size_t numPixels = m_width * m_height;
+			CUDA_CHECK(cudaMemcpy(dev_illuminationPrev, dev_pongBuffer, numPixels * sizeof(glm::vec4), cudaMemcpyDeviceToDevice));
+
+		}
 
 		// Ping pong
 		std::swap(dev_pingBuffer, dev_pongBuffer);
