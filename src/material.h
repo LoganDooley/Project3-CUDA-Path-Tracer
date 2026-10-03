@@ -47,11 +47,30 @@ struct Material
         if(type == MaterialType::BlinnPhong && blinnPhong.exponent > 1000.0f) {
             return true;
 		}
-        if (type == MaterialType::PbrMetallicRoughness && pbr.roughness < 0.08f) {
-            return true;
-        }
+        // PBR materials have a minimum roughness applied so they are not a delta distribution
         return false;
 	}
+
+    __device__ float getDiffuseSampleProbability() const {
+        if (type == MaterialType::PbrMetallicRoughness) {
+			// 50/50 split between diffuse and specular, but if metal or transmissive then no diffuse sampling
+            return 0.5f * (1.0f - pbr.metallic) * (1.0f - pbr.transmission);
+        }
+
+        if (type == MaterialType::BlinnPhong) {
+            // Weight by specular vs diffuse intensity
+            const glm::vec3 luminanceWeights = glm::vec3(0.2126f, 0.7152f, 0.0722f);
+            float diffuseWeight = glm::dot(albedo, luminanceWeights);
+            float specularWeight = glm::dot(blinnPhong.specularColor, luminanceWeights);
+            float totalWeight = diffuseWeight + specularWeight;
+            if (totalWeight <= 0.0f) {
+                return 0.5f;
+            }
+            return glm::clamp(diffuseWeight / totalWeight, 0.1f, 0.9f);
+        }
+
+        return 1.0f;
+    }
 
     __device__ void initializeFromIntersection(const IntersectionData& intersectionData);
 
@@ -110,8 +129,11 @@ struct Material
         }
         else if(type == MaterialType::PbrMetallicRoughness) {
             scattering.model = DistributionModel::GGX;
-            scattering.alpha = pbr.roughness * pbr.roughness;
+			// Clamp roughness to a minimum value so we don't get a delta distribution
+            float roughness = glm::max(pbr.roughness, 0.05f);
+            scattering.alpha = roughness * roughness;
             scattering.f0 = albedo;
+            scattering.bAllowTransmission = pbr.transmission > 0.0f;
 		}
 
         return scattering;

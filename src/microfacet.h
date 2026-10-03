@@ -107,6 +107,28 @@ struct MicrofacetScattering {
 	glm::vec3 f0;
 	float ior;
 
+	bool bAllowTransmission = false;
+
+	// Probability of reflecting vs. refracting off of a sampled microfacet
+	__device__ float reflectionProbability(float dotIH, float etaI, float etaT) const {
+		if (!bAllowTransmission) {
+			// No transmission allowed, always reflect
+			return 1.0f;
+		}
+
+		float eta = etaI / etaT;
+		float sin2ThetaT = eta * eta * glm::max(0.0f, 1.0f - dotIH * dotIH);
+		if (sin2ThetaT >= 1.0f) {
+			// Total internal reflection, every sample reflects
+			return 1.0f;
+		}
+
+		float r0 = (etaI - etaT) / (etaI + etaT);
+		r0 = r0 * r0;
+		float F = r0 + (1.0f - r0) * glm::pow(1.0f - dotIH, 5.0f);
+		return glm::clamp(F, 0.10f, 0.90f);
+	}
+
 	__device__ glm::vec3 evaluate(const glm::vec3& n, const glm::vec3& wi, const glm::vec3& wo, bool bInside) const {
 		float cosThetaI = glm::max(0.0f, glm::dot(n, wi));
 		float cosThetaO = glm::dot(n, wo);
@@ -210,16 +232,12 @@ struct MicrofacetScattering {
 			? Microfacet::PDF_BlinnPhong(dotNH, specularExponent)
 			: Microfacet::PDF_GGX(dotNH, alpha);
 
-		float r0 = (etaI - etaT) / (etaI + etaT);
-		r0 = r0 * r0;
-		float F = r0 + (1.0f - r0) * glm::pow(1.0f - dotIH, 5.0f);
-
-		float reflectionProb = glm::clamp(F, 0.10f, 0.90f);
-		if(model == DistributionModel::BlinnPhong) {
-			reflectionProb = 1.0f;
-		}
+		float reflectionProb = reflectionProbability(dotIH, etaI, etaT);
 
 		if (bIsReflection) {
+			if (dotIH <= 0.0f) {
+				return 0.0f;
+			}
 			return (pdfHalf / (4.0f * dotIH)) * reflectionProb;
 		}
 		else {
@@ -228,8 +246,8 @@ struct MicrofacetScattering {
 				return 0.0f;
 			}
 
+			// Matching pdf with sample() for transmission
 			float transmissionProb = 1.0f - reflectionProb;
-			return (pdfHalf * dotOH / (sqrtDenom * sqrtDenom)) * transmissionProb;
 			return (pdfHalf * (etaT * etaT / (etaI * etaI)) * dotOH / (sqrtDenom * sqrtDenom)) * transmissionProb;
 		}
 	}
@@ -260,13 +278,7 @@ struct MicrofacetScattering {
 		float etaI = bInside ? ior : 1.0f;
 		float etaT = bInside ? 1.0f : ior;
 
-		float r0 = (etaI - etaT) / (etaI + etaT);
-		r0 = r0 * r0;
-		float F = r0 + (1.0f - r0) * glm::pow(1.0f - dotIH, 5.0f);
-		float reflectionProb = glm::clamp(F, 0.10f, 0.90f);
-		if(model == DistributionModel::BlinnPhong) {
-			reflectionProb = 1.0f;
-		}
+		float reflectionProb = reflectionProbability(dotIH, etaI, etaT);
 
 		float dotNH = glm::max(0.0f, glm::dot(n, H));
 		float pdfHalf = (model == DistributionModel::GGX) 
@@ -279,10 +291,10 @@ struct MicrofacetScattering {
 			out_wo = glm::reflect(-wi, H);
 
 			float cosThetaO = glm::dot(n, out_wo);
-			if (cosThetaO <= 0.0f) { 
-				out_pdf = 0.0f; 
-				out_throughput = glm::vec3(0.0f); 
-				return; 
+			if (cosThetaO <= 0.0f || dotIH <= 0.0f) {
+				out_pdf = 0.0f;
+				out_throughput = glm::vec3(0.0f);
+				return;
 			}
 
 			glm::vec3 f = evaluate(n, wi, out_wo, bInside);
@@ -302,16 +314,16 @@ struct MicrofacetScattering {
 				out_wo = glm::reflect(-wi, H);
 
 				float cosThetaO = glm::dot(n, out_wo);
-				if (cosThetaO <= 0.0f) { 
-					out_pdf = 0.0f; 
-					out_throughput = glm::vec3(0.0f); 
-					return; 
+				if (cosThetaO <= 0.0f || dotIH <= 0.0f) {
+					out_pdf = 0.0f;
+					out_throughput = glm::vec3(0.0f);
+					return;
 				}
 
 				glm::vec3 f = evaluate(n, wi, out_wo, bInside);
 
-				float transmissionProb = 1.0f - reflectionProb;
-				out_pdf = (pdfHalf / (4.0f * dotIH)) * transmissionProb;
+				// Reflection probability is 1.0, so no need to multiply the pdf by reflectionProb
+				out_pdf = pdfHalf / (4.0f * dotIH);
 				out_throughput = (out_pdf <= 0.0f) 
 					? glm::vec3(0.0f) 
 					: (f * cosThetaO) / out_pdf;

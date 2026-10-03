@@ -296,7 +296,8 @@ __global__ void kernShade(
         return;
     }
 
-    thrust::default_random_engine rng = makeSeededRandomEngine(frameIndex, index, iteration);
+    // Offset depth by 1 since depth 0 is the seed for camera rays, so don't want to correlate them
+    thrust::default_random_engine rng = makeSeededRandomEngine(frameIndex, index, iteration + 1);
     thrust::uniform_real_distribution<float> u01(0, 1);
     
     // Next Event Estimation (Sample lights)

@@ -103,8 +103,14 @@ __device__ float Material::pdf(const glm::vec3& n, const glm::vec3& wi, const gl
 		return absCosThetaO / glm::pi<float>();
 	}
 
+	// Incorporate diffuse probability since we randomly pick between diffuse and microfacet sampling
+	float diffuseProbability = getDiffuseSampleProbability();
+	float diffusePdf = bIsReflection ? absCosThetaO / glm::pi<float>() : 0.0f;
+
 	MicrofacetScattering scattering = getSpecularScattering();
-	return scattering.pdf(n, wi, wo, bInside);
+	float microfacetPdf = scattering.pdf(n, wi, wo, bInside);
+
+	return diffuseProbability * diffusePdf + (1.0f - diffuseProbability) * microfacetPdf;
 }
 
 __device__ void Material::sample(
@@ -183,13 +189,38 @@ __device__ void Material::sample(
 		return;
 	}
 
-	MicrofacetScattering scattering = getSpecularScattering();
-	scattering.sample(n, wi, random, bInside, wo, outThroughput, outPdf, bIsTransmission);
+	// Pick between diffuse and microfacet sampling
+	float diffuseProbability = getDiffuseSampleProbability();
 
-	if (type == MaterialType::PbrMetallicRoughness && !bIsTransmission) {
-		glm::vec3 evaluatedTotal = evaluate(n, wi, wo, bInside, true);
-		outThroughput = (evaluatedTotal * glm::dot(n, wo)) / outPdf;
+	if (random.z < diffuseProbability) {
+		float diffusePdf = 0.0f;
+		wo = Samplers::sampleCosineWeightedHemisphere(n, glm::vec2(random), diffusePdf);
 	}
+	else {
+		glm::vec3 remappedRandom = glm::vec3(random.x, random.y, (random.z - diffuseProbability) / (1.0f - diffuseProbability));
+
+		MicrofacetScattering scattering = getSpecularScattering();
+		glm::vec3 lobeThroughput = glm::vec3(0.0f);
+		float lobePdf = 0.0f;
+		scattering.sample(n, wi, remappedRandom, bInside, wo, lobeThroughput, lobePdf, bIsTransmission);
+
+		if (lobePdf <= 0.0f) {
+			outPdf = 0.0f;
+			outThroughput = glm::vec3(0.0f);
+			return;
+		}
+	}
+
+	float cosThetaO = glm::dot(n, wo);
+	bIsTransmission = cosThetaO < 0.0f;
+
+	outPdf = pdf(n, wi, wo, bInside, true);
+	if (outPdf <= 0.0f) {
+		outThroughput = glm::vec3(0.0f);
+		return;
+	}
+
+	outThroughput = evaluate(n, wi, wo, bInside, true) * glm::abs(cosThetaO) / outPdf;
 }
 
 __device__ glm::vec3 Material::sampleBrdf(
