@@ -715,7 +715,7 @@ void Application::renderImGui()
 
 	ImGui::Begin("Test Window");
 	if(ImGui::Button("Load Scene File")) {
-		pickSceneFile();
+		m_bOpenLoadSceneModal = true;
 	}
 	if (ImGui::Button("Load Environment Map")) {
 		pickEnvironmentMap();
@@ -745,6 +745,8 @@ void Application::renderImGui()
 	double usedMB = usedBytes / (1024.0 * 1024.0);
 	ImGui::Text("Used CUDA Memory: %.2f MB", usedMB);
 	ImGui::End();
+
+	drawLoadSceneModal();
 }
 
 void Application::pickSceneFile()
@@ -762,10 +764,70 @@ void Application::pickSceneFile()
 		return;
 	}
 
-	std::string sceneFilePath = outPath.get();
+	m_pendingScenePath = outPath.get();
+}
 
-	m_currentScene = SceneLoader::loadFromFile(sceneFilePath);
-	m_camera.m_hasChanged = true;
+void Application::drawLoadSceneModal()
+{
+	const char* modalName = "Load Scene";
+
+	if (m_bOpenLoadSceneModal) {
+		ImGui::OpenPopup(modalName);
+		m_bOpenLoadSceneModal = false;
+	}
+
+	// Put modal in the center of the screen
+	ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+	if (ImGui::BeginPopupModal(modalName, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		// Pick filepath
+		ImGui::SetNextItemWidth(400.0f);
+		ImGui::InputText("##ScenePath", m_pendingScenePath.data(), m_pendingScenePath.size() + 1, ImGuiInputTextFlags_ReadOnly);
+		ImGui::SameLine();
+		if (ImGui::Button("Browse...")) {
+			pickSceneFile();
+		}
+
+		// Pick up axis if thre is a scene selected
+		bool bHasScene = !m_pendingScenePath.empty();
+
+		const std::vector<UpAxis> upAxisOptions = { UpAxis::XUp, UpAxis::YUp, UpAxis::ZUp };
+		const std::vector<const char*> upAxisLabels = { "X Up", "Y Up (Default)", "Z Up" };
+
+		int selectedOption = 0;
+		for (int i = 0; i < 3; i++) {
+			if (upAxisOptions[i] == m_selectedUpAxis) {
+				selectedOption = i;
+			}
+		}
+
+		if (ImGui::BeginCombo("Up Axis", upAxisLabels[selectedOption])) {
+			for (int i = 0; i < 3; i++) {
+				bool bSelected = (i == selectedOption);
+				if (ImGui::Selectable(upAxisLabels[i], bSelected)) {
+					m_selectedUpAxis = upAxisOptions[i];
+				}
+				if (bSelected) {
+					ImGui::SetItemDefaultFocus();
+				}
+			}
+			ImGui::EndCombo();
+		}
+
+		ImGui::BeginDisabled(!bHasScene);
+		if (ImGui::Button("Load")) {
+			m_currentScene = SceneLoader::loadFromFile(m_pendingScenePath, m_selectedUpAxis);
+			m_camera.m_hasChanged = true;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) {
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndPopup();
+	}
 }
 
 void Application::saveCurrentRender()

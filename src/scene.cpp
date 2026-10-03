@@ -246,21 +246,38 @@ void Scene::freeDeviceMemory()
     m_textureArrays.clear();
 }
 
-std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath)
+static std::string getLowercaseExtension(const std::string& filepath)
 {
-	std::filesystem::path path(filepath);
-	std::string ext = path.extension().string();
-
+    std::string ext = std::filesystem::path(filepath).extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    return ext;
+}
+
+static glm::mat4 getUpAxisTransform(UpAxis upAxis)
+{
+    if (upAxis == UpAxis::ZUp) {
+        return glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    }
+    else if(upAxis == UpAxis::XUp) {
+        return glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	}
+    else {
+		return glm::mat4(1.0f);
+    }
+}
+
+std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath, UpAxis upAxis)
+{
+    std::string ext = getLowercaseExtension(filepath);
 
     if(ext == ".json") {
-        return loadFromJson(filepath);
+        return loadFromJson(filepath, upAxis);
     }
     else if(ext == ".gltf" || ext == ".glb") {
-        return loadFromGltf(filepath);
+        return loadFromGltf(filepath, upAxis);
     }
     else if(ext == ".obj") {
-        return loadFromObj(filepath);
+        return loadFromObj(filepath, upAxis);
 	}
     else {
 		std::cerr << "Unsupported scene file format: " << ext << std::endl;
@@ -268,7 +285,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath)
 	}
 }
 
-std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath)
+std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath, UpAxis upAxis)
 {
     std::ifstream file(filepath);
     if (!file.is_open()) {
@@ -334,6 +351,8 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath)
     }
 
     // Parse geometry
+    glm::mat4 upAxisTransform = getUpAxisTransform(upAxis);
+
     if (sceneJson.contains("Objects")) {
         for (const auto& objData : sceneJson["Objects"]) {
             Geom geom{};
@@ -359,7 +378,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath)
             glm::mat4 scaleMat = glm::scale(glm::mat4(1.0f), scale);
 
             // Set matrices
-            geom.transform = translationMat * rotationMat * scaleMat;
+            geom.transform = upAxisTransform * translationMat * rotationMat * scaleMat;
             geom.inverseTransform = glm::inverse(geom.transform);
             geom.invTranspose = glm::inverseTranspose(geom.transform);
 
@@ -652,7 +671,7 @@ void parseGltfMaterials(const tg3_model& model, const std::string& baseDir, std:
 	}
 }
 
-std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
+std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath, UpAxis upAxis)
 {
     std::unique_ptr<Scene> scene = std::make_unique<Scene>();
 
@@ -691,7 +710,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
     // Parse geometry from default scene
 
     constexpr float kImportScale = 1.0f;
-    glm::mat4 rootTransform = glm::scale(glm::mat4(1.0f), glm::vec3(kImportScale));
+    glm::mat4 rootTransform = getUpAxisTransform(upAxis) * glm::scale(glm::mat4(1.0f), glm::vec3(kImportScale));
 
 	uint32_t activeSceneIdx = (model.default_scene >= 0 && model.default_scene < model.scenes_count) ? model.default_scene : 0;
     if(activeSceneIdx < model.scenes_count) {
@@ -764,7 +783,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath)
     return std::make_unique<Scene>(geometry, lightCount, sortedTriangles, blasNodes, tlasNodes, materials, textures, textureArrays);
 }
 
-std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
+std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, UpAxis upAxis)
 {
 	tinyobj::ObjReaderConfig readerConfig;
 
@@ -963,9 +982,9 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath)
 
 		geom.triangleCount = triangles.size() - geom.triangleOffset;
 
-		geom.transform = glm::mat4(1.0f);
-		geom.inverseTransform = glm::mat4(1.0f);
-		geom.invTranspose = glm::mat4(1.0f);
+		geom.transform = getUpAxisTransform(upAxis);
+		geom.inverseTransform = glm::inverse(geom.transform);
+		geom.invTranspose = glm::inverseTranspose(geom.transform);
 
         if (geom.triangleCount > 0) {
             geometry.push_back(geom);

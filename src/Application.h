@@ -39,6 +39,8 @@ private:
 
 	void pickSceneFile();
 
+	void drawLoadSceneModal();
+
 	void saveCurrentRender();
 
 	void pickEnvironmentMap();
@@ -52,6 +54,11 @@ private:
 	InputState m_inputState;
 
 	std::unique_ptr<Scene> m_currentScene = nullptr;
+
+	// Load scene modal state
+	std::string m_pendingScenePath;
+	bool m_bOpenLoadSceneModal = false;
+	UpAxis m_selectedUpAxis = UpAxis::YUp;
 
 	std::unique_ptr<EnvironmentMap> m_currentEnvironmentMap = nullptr;
 

@@ -74,12 +74,18 @@ private:
 	void freeDeviceMemory();
 };
 
+enum class UpAxis {
+	YUp,
+	ZUp,
+	XUp
+};
+
 class SceneLoader {
 public:
-	static std::unique_ptr<Scene> loadFromFile(const std::string& filepath);
+	static std::unique_ptr<Scene> loadFromFile(const std::string& filepath, UpAxis upAxis = UpAxis::YUp);
 
 private:
-	static std::unique_ptr<Scene> loadFromJson(const std::string& filepath);
-	static std::unique_ptr<Scene> loadFromGltf(const std::string& filepath);
-	static std::unique_ptr<Scene> loadFromObj(const std::string& filepath);
+	static std::unique_ptr<Scene> loadFromJson(const std::string& filepath, UpAxis upAxis);
+	static std::unique_ptr<Scene> loadFromGltf(const std::string& filepath, UpAxis upAxis);
+	static std::unique_ptr<Scene> loadFromObj(const std::string& filepath, UpAxis upAxis);
 };
