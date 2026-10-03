@@ -570,27 +570,24 @@ void launchDebugUVKernel(IntersectionData* dev_intersectionData, cudaSurfaceObje
 }
 
 struct is_path_active {
-    __host__ __device__ bool operator()(const thrust::tuple<PathState, IntersectionData>& tuple) {
-        return thrust::get<0>(tuple).active;
+    __host__ __device__ bool operator()(const PathState& pathState) const {
+        return pathState.active;
     }
 };
 
-int runStreamCompaction(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int numActivePaths) {
+int runStreamCompaction(PathState* dev_pathStates, int numActivePaths) {
     thrust::device_ptr<PathState> th_path_start(dev_pathStates);
-    thrust::device_ptr<IntersectionData> th_inter_start(dev_intersectionData);
+    thrust::device_ptr<PathState> th_path_end = th_path_start + numActivePaths;
 
-    auto zip_start = thrust::make_zip_iterator(thrust::make_tuple(th_path_start, th_inter_start));
-    auto zip_end = zip_start + numActivePaths;
-
-    // stable_partition moves active paths to the front, preserving relative order
-    auto zip_new_end = thrust::stable_partition(
+    // Compact the path states
+    thrust::device_ptr<PathState> th_new_end = thrust::stable_partition(
         thrust::device,
-        zip_start,
-        zip_end,
+        th_path_start,
+        th_path_end,
         is_path_active()
     );
 
-    return zip_new_end - zip_start;
+    return th_new_end - th_path_start;
 }
 
 

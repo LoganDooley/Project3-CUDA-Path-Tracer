@@ -100,6 +100,6 @@ void launchColorKernel(cudaSurfaceObject_t surface, int width, int height, float
 
 void launchDebugUVKernel(IntersectionData* dev_intersectionData, cudaSurfaceObject_t surface, int width, int height);
 
-int runStreamCompaction(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int numActivePaths);
+int runStreamCompaction(PathState* dev_pathStates, int numActivePaths);
 
 void sortPathsByMaterial(PathState* dev_pathStates, IntersectionData* dev_intersectionData, int activePathCount, const Material* dev_materials);

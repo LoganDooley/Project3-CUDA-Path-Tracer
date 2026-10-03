@@ -155,7 +155,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
 
         if (m_renderSettings.bStreamCompactionEnabled) {
             // Run stream compaction
-            currentActivePathCount = runStreamCompaction(dev_pathStates, dev_intersectionData, currentActivePathCount);
+            currentActivePathCount = runStreamCompaction(dev_pathStates, currentActivePathCount);
         }
     }
 
