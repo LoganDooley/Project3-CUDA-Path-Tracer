@@ -8,6 +8,7 @@ struct PathState {
 	Ray ray = Ray{};
 	glm::vec3 throughput = glm::vec3(1.0f);
 	glm::vec3 accumulatedColor = glm::vec3(0.0f);
+	glm::vec3 directColor = glm::vec3(0.0f); // Portion of accumulatedColor that is from direct lighting
 	int bounceCount = 0;
 	bool active = true;
 	int pixelIndex = -1;

@@ -36,6 +36,26 @@ __global__ void kernTemporalAccumulation(
 	float momentsAlphaMin,
 	int width, int height);
 
+// SVGF needs to compute direct and indirect separately, so create a channel struct
+// to store all the buffers needed for the reconstruction filter
+struct SVGFChannel {
+	// Illumination buffers
+	glm::vec4* dev_illuminationPrev = nullptr;
+	glm::vec4* dev_pingBuffer = nullptr;
+	glm::vec4* dev_pongBuffer = nullptr;
+
+	// Variance & Luminance moment buffers
+	glm::vec2* dev_moments = nullptr;
+	glm::vec2* dev_momentsPrev = nullptr;
+	float* dev_variancePing = nullptr;
+	float* dev_variancePong = nullptr;
+	float* dev_prefilteredVariance = nullptr;
+
+	void allocate(size_t numPixels);
+	void free();
+	void swapBuffers();
+};
+
 class SVGFManager {
 public:
 	SVGFManager();
@@ -65,13 +85,15 @@ public:
 
 	void executeAtrousFilteringPipeline();
 
+	void combineChannels();
+
 	void debugNormals(cudaSurfaceObject_t surface);
 
 	void debugMotionVectors(cudaSurfaceObject_t surface);
 
 	void debugIlluminance(cudaSurfaceObject_t surface);
 
-	void debugVariance(cudaSurfaceObject_t surface);
+	void debugVariance(cudaSurfaceObject_t surface, bool bIndirect = false);
 
 	void drawSettingsImGui();
 
@@ -85,17 +107,12 @@ public:
 	glm::vec4* dev_gBuffer_normalDepthPrev = nullptr;
 	unsigned int* dev_gBuffer_historyLengthPrev = nullptr;
 
-	// Illumination buffers
-	glm::vec4* dev_illuminationPrev = nullptr;
-	glm::vec4* dev_pingBuffer = nullptr;
-	glm::vec4* dev_pongBuffer = nullptr;
+	// Direct and indirect lighting are filtered separately
+	SVGFChannel directChannel;
+	SVGFChannel indirectChannel;
 
-	// Variance & Luminance moments
-	glm::vec2* dev_moments = nullptr;
-	glm::vec2* dev_momentsPrev = nullptr;
-	float* dev_variancePing = nullptr;
-	float* dev_variancePong = nullptr;
-	float* dev_prefilteredVariance = nullptr;
+	// Filtered direct + indirect
+	glm::vec4* dev_outputColor = nullptr;
 
 private:
 	void allocateBuffers();

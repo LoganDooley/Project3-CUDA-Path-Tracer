@@ -146,7 +146,8 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             currentActivePathCount,
             m_cudaSurfaceObject,
             dev_accumulatedColor,
-            m_renderSettings.bSVGFEnabled ? m_svgfManager.dev_pingBuffer : nullptr,
+            m_renderSettings.bSVGFEnabled ? m_svgfManager.directChannel.dev_pingBuffer : nullptr,
+            m_renderSettings.bSVGFEnabled ? m_svgfManager.indirectChannel.dev_pingBuffer : nullptr,
             dev_sampleCounts,
             m_extent.width,
             i,
@@ -163,7 +164,8 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             currentActivePathCount, 
             m_cudaSurfaceObject, 
             dev_accumulatedColor,
-            m_renderSettings.bSVGFEnabled ? m_svgfManager.dev_pingBuffer : nullptr,
+            m_renderSettings.bSVGFEnabled ? m_svgfManager.directChannel.dev_pingBuffer : nullptr,
+            m_renderSettings.bSVGFEnabled ? m_svgfManager.indirectChannel.dev_pingBuffer : nullptr,
             dev_sampleCounts,
             m_extent.width);
     }
@@ -175,6 +177,8 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
         m_svgfManager.executeVarianceEstimation();
 
         m_svgfManager.executeAtrousFilteringPipeline();
+
+        m_svgfManager.combineChannels();
 
         m_svgfManager.debugIlluminance(m_cudaSurfaceObject);
 

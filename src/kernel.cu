@@ -7,6 +7,9 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/tuple.h>
 #include <thrust/partition.h>
+#include <thrust/sequence.h>
+#include <thrust/gather.h>
+#include <thrust/sort.h>
 
 #include "samplers.h"
 #include "material.h"
@@ -59,10 +62,20 @@ __device__ uchar4 convertColorToUChar4(const glm::vec3& color) {
     return pixelColor;
 }
 
+__device__ void addRadiance(PathState& pathState, const glm::vec3& radiance, bool bDirect) {
+    // Direct lighting is anything coming directly from a light source, so
+    // either NEE at bounce 0, or bounce 1
+    pathState.accumulatedColor += radiance;
+    if (bDirect) {
+        pathState.directColor += radiance;
+    }
+}
+
 __device__ void writePathStateToSurface(const PathState& pathState, 
     cudaSurfaceObject_t surface, 
     glm::vec3* dev_accumulatedColor,
-    glm::vec4* dev_currentColor,
+    glm::vec4* dev_currentDirectColor,
+    glm::vec4* dev_currentIndirectColor,
     unsigned int* dev_sampleCounts, 
     int width,
     bool bHit) {
@@ -71,9 +84,11 @@ __device__ void writePathStateToSurface(const PathState& pathState,
     unsigned int currentSampleIndex = atomicAdd(&dev_sampleCounts[pixelIndex], 1);
 
     dev_accumulatedColor[pixelIndex] += pathState.accumulatedColor;
-    if (dev_currentColor != nullptr) {
+    if (dev_currentDirectColor != nullptr && dev_currentIndirectColor != nullptr) {
+        // Record direct and indirect color for svgf filtering
         float hitValue = bHit ? 1.0f : 0.0f;
-        dev_currentColor[pixelIndex] = glm::vec4(pathState.accumulatedColor, hitValue);
+        dev_currentDirectColor[pixelIndex] = glm::vec4(pathState.directColor, hitValue);
+        dev_currentIndirectColor[pixelIndex] = glm::vec4(pathState.accumulatedColor - pathState.directColor, hitValue);
     }
 
     // Get average color over all samples
@@ -181,6 +196,7 @@ __global__ void kernGenerateCameraRays(PathState* dev_pathStates,
     pathState.pixelIndex = pixelIndex;
     pathState.throughput = glm::vec3(1.0f);
     pathState.accumulatedColor = glm::vec3(0.0f);
+    pathState.directColor = glm::vec3(0.0f);
     pathState.bounceCount = 0;
     pathState.active = true;
 
@@ -221,7 +237,8 @@ __global__ void kernShade(
     int activePathCount,
     cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
-    glm::vec4* dev_currentColor,
+    glm::vec4* dev_currentDirectColor,
+    glm::vec4* dev_currentIndirectColor,
     unsigned int* dev_sampleCounts,
     int width,
     int iteration,
@@ -243,9 +260,10 @@ __global__ void kernShade(
 
     // Handle misses
     if (intersectionData.t <= 0.0f) {
-        pathState.accumulatedColor += pathState.throughput * sampleEnvironmentMap(environmentMap, pathState.ray.direction);
+        // Considered direct if from the camera or off of the first bounce
+        addRadiance(pathState, pathState.throughput * sampleEnvironmentMap(environmentMap, pathState.ray.direction), pathState.bounceCount <= 1);
         pathState.active = false;
-        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, pathState.bounceCount == 0);
+        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, width, pathState.bounceCount == 0);
         return;
     }
 
@@ -269,11 +287,12 @@ __global__ void kernShade(
 			misWeight = MathHelpers::powerHeuristic(pathState.previousBrdfPdf, lightPdf);
         }
 
-        pathState.accumulatedColor += pathState.throughput * material.albedo * material.emittance * misWeight;
+		// Considered direct if from the camera or off of the first bounce
+        addRadiance(pathState, pathState.throughput * material.albedo * material.emittance * misWeight, pathState.bounceCount <= 1);
 
         // Hitting a light terminates the path
         pathState.active = false;
-        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
+        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, width, true);
         return;
     }
 
@@ -297,7 +316,8 @@ __global__ void kernShade(
 			float misWeight = MathHelpers::powerHeuristic(lightPdf, pdfBrdf);
 
             float cosThetaNE = glm::max(0.0f, glm::abs(glm::dot(intersectionData.normal, directionToLight)));
-			pathState.accumulatedColor += pathState.throughput * (lightSample / lightPdf) * f * cosThetaNE * misWeight;
+            // Considered direct if we are doing NEE off of the first bounce
+			addRadiance(pathState, pathState.throughput * (lightSample / lightPdf) * f * cosThetaNE * misWeight, pathState.bounceCount == 0);
         }
     }
 
@@ -325,7 +345,7 @@ __global__ void kernShade(
     // Handle invalid pdf or throughput
 	if (brdfPdf <= 0.0f || glm::all(glm::lessThanEqual(sampleThroughput, glm::vec3(0.0f)))) {
         pathState.active = false;
-        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
+        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, width, true);
         return;
 	}
 
@@ -343,7 +363,7 @@ __global__ void kernShade(
         if (u01(rng) > survivalProbability) {
             // Terminate path
             pathState.active = false;
-            writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
+            writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, width, true);
             return;
         }
 
@@ -384,7 +404,8 @@ __global__ void kernDebugUV(cudaSurfaceObject_t surface,
 
 __global__ void kernColorSurface(cudaSurfaceObject_t surface, 
     glm::vec3* dev_accumulatedColor,
-    glm::vec4* dev_currentColor,
+    glm::vec4* dev_currentDirectColor,
+    glm::vec4* dev_currentIndirectColor,
     unsigned int* dev_sampleCounts, 
     PathState* dev_pathStates, 
     int n, 
@@ -398,7 +419,7 @@ __global__ void kernColorSurface(cudaSurfaceObject_t surface,
 
     PathState currentPathState = dev_pathStates[index];
 
-    writePathStateToSurface(currentPathState, surface, dev_accumulatedColor, dev_currentColor, dev_sampleCounts, width, true);
+    writePathStateToSurface(currentPathState, surface, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, width, true);
 }
 
 __global__ void kernDebugRays(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height)
@@ -479,7 +500,8 @@ void launchShadeKernel(PathState* dev_pathStates,
     int activePathCount,
     cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
-    glm::vec4* dev_currentColor,
+    glm::vec4* dev_currentDirectColor,
+    glm::vec4* dev_currentIndirectColor,
     unsigned int* dev_sampleCounts,
     int width,
     int iteration,
@@ -495,7 +517,8 @@ void launchShadeKernel(PathState* dev_pathStates,
         activePathCount,
         surface,
         dev_accumulatedColor,
-        dev_currentColor,
+        dev_currentDirectColor,
+        dev_currentIndirectColor,
         dev_sampleCounts,
         width,
         iteration,
@@ -506,7 +529,8 @@ void launchColorSurfaceKernel(PathState* dev_pathStates,
     int activePathCount,
     cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
-    glm::vec4* dev_currentColor,
+    glm::vec4* dev_currentDirectColor,
+    glm::vec4* dev_currentIndirectColor,
     unsigned int* dev_sampleCounts,
     int width)
 {
@@ -515,7 +539,8 @@ void launchColorSurfaceKernel(PathState* dev_pathStates,
 
     kernColorSurface<<<gridSize, blockSize>>>(surface, 
         dev_accumulatedColor,
-        dev_currentColor,
+        dev_currentDirectColor,
+        dev_currentIndirectColor,
         dev_sampleCounts,
         dev_pathStates, 
         activePathCount, 
@@ -598,18 +623,47 @@ void sortPathsByMaterial(PathState* dev_pathStates, IntersectionData* dev_inters
     thrust::device_ptr<PathState> thrust_pathStates(dev_pathStates);
     thrust::device_ptr<IntersectionData> thrust_intersectionData(dev_intersectionData);
 
-    uint8_t* dev_materialTypes;
-    if (cudaMalloc((void**)&dev_materialTypes, activePathCount * sizeof(uint8_t)) != cudaSuccess) {
+    uint8_t* dev_materialTypes = nullptr;
+    int* dev_sortedIndices = nullptr;
+    PathState* dev_pathStatesTemp = nullptr;
+    IntersectionData* dev_intersectionDataTemp = nullptr;
+
+    if (cudaMalloc((void**)&dev_materialTypes, activePathCount * sizeof(uint8_t)) != cudaSuccess ||
+        cudaMalloc((void**)&dev_sortedIndices, activePathCount * sizeof(int)) != cudaSuccess ||
+        cudaMalloc((void**)&dev_pathStatesTemp, activePathCount * sizeof(PathState)) != cudaSuccess ||
+        cudaMalloc((void**)&dev_intersectionDataTemp, activePathCount * sizeof(IntersectionData)) != cudaSuccess) {
+        cudaFree(dev_materialTypes);
+        cudaFree(dev_sortedIndices);
+        cudaFree(dev_pathStatesTemp);
+        cudaFree(dev_intersectionDataTemp);
         return;
     }
 
     thrust::device_ptr<uint8_t> thrust_materialTypes(dev_materialTypes);
+    thrust::device_ptr<int> thrust_sortedIndices(dev_sortedIndices);
 
+	// Get material types for each intersection
     GetMaterialType transformFunction(dev_materials);
-
     thrust::transform(thrust_intersectionData, thrust_intersectionData + activePathCount, thrust_materialTypes, transformFunction);
 
+    // Do a sort of indices based on material types to do a scatter of path states and intersection data
+    thrust::sequence(thrust_sortedIndices, thrust_sortedIndices + activePathCount);
+    thrust::sort_by_key(thrust_materialTypes, thrust_materialTypes + activePathCount, thrust_sortedIndices);
+
+    // Reorder paths and intersections by the sorted permutation
     auto zip_values = thrust::make_zip_iterator(thrust::make_tuple(thrust_pathStates, thrust_intersectionData));
-    thrust::sort_by_key(thrust_materialTypes, thrust_materialTypes + activePathCount, zip_values);
+    auto zip_temp = thrust::make_zip_iterator(thrust::make_tuple(
+        thrust::device_ptr<PathState>(dev_pathStatesTemp),
+        thrust::device_ptr<IntersectionData>(dev_intersectionDataTemp)));
+    // Gather into temporary arrays
+    thrust::gather(thrust_sortedIndices, thrust_sortedIndices + activePathCount, zip_values, zip_temp);
+
+    // Copy sorted data back to original arrays
+    cudaMemcpy(dev_pathStates, dev_pathStatesTemp, activePathCount * sizeof(PathState), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(dev_intersectionData, dev_intersectionDataTemp, activePathCount * sizeof(IntersectionData), cudaMemcpyDeviceToDevice);
+
     cudaFree(dev_materialTypes);
+    cudaFree(dev_sortedIndices);
+    cudaFree(dev_pathStatesTemp);
+    cudaFree(dev_intersectionDataTemp);
 }

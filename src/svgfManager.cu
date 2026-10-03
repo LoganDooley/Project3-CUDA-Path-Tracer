@@ -7,6 +7,7 @@
 
 #include "imgui.h"
 
+#include <initializer_list>
 #include <iostream>
 
 #define CUDA_CHECK(ans) { cudaAssert((ans), __FILE__, __LINE__); }
@@ -689,6 +690,58 @@ __global__ void kernDebugVariance(
 	surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
 }
 
+__global__ void kernCombineChannels(
+	const glm::vec4* dev_direct,
+	const glm::vec4* dev_indirect,
+	glm::vec4* dev_outputColor,
+	int width, int height)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x >= width || y >= height) return;
+
+	int pixelIndex = y * width + x;
+
+	glm::vec4 direct = dev_direct[pixelIndex];
+	glm::vec4 indirect = dev_indirect[pixelIndex];
+
+	// Use direct.w, but both have the same w value
+	dev_outputColor[pixelIndex] = glm::vec4(glm::vec3(direct) + glm::vec3(indirect), direct.w);
+}
+
+void SVGFChannel::allocate(size_t numPixels)
+{
+	CUDA_CHECK(cudaMalloc(&dev_illuminationPrev, numPixels * sizeof(glm::vec4)));
+	CUDA_CHECK(cudaMalloc(&dev_pingBuffer, numPixels * sizeof(glm::vec4)));
+	CUDA_CHECK(cudaMalloc(&dev_pongBuffer, numPixels * sizeof(glm::vec4)));
+
+	CUDA_CHECK(cudaMalloc(&dev_moments, numPixels * sizeof(glm::vec2)));
+	CUDA_CHECK(cudaMalloc(&dev_momentsPrev, numPixels * sizeof(glm::vec2)));
+	CUDA_CHECK(cudaMalloc(&dev_variancePing, numPixels * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&dev_variancePong, numPixels * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&dev_prefilteredVariance, numPixels * sizeof(float)));
+}
+
+void SVGFChannel::free()
+{
+	cudaFree(dev_illuminationPrev);
+	cudaFree(dev_pingBuffer);
+	cudaFree(dev_pongBuffer);
+	cudaFree(dev_moments);
+	cudaFree(dev_momentsPrev);
+	cudaFree(dev_variancePing);
+	cudaFree(dev_variancePong);
+	cudaFree(dev_prefilteredVariance);
+
+	*this = SVGFChannel{};
+}
+
+void SVGFChannel::swapBuffers()
+{
+	std::swap(dev_moments, dev_momentsPrev);
+}
+
 SVGFManager::SVGFManager()
 {
 }
@@ -718,14 +771,9 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 		dev_gBuffer_historyLength = other.dev_gBuffer_historyLength;
 		dev_gBuffer_normalDepthPrev = other.dev_gBuffer_normalDepthPrev;
 		dev_gBuffer_historyLengthPrev = other.dev_gBuffer_historyLengthPrev;
-		dev_illuminationPrev = other.dev_illuminationPrev;
-		dev_pingBuffer = other.dev_pingBuffer;
-		dev_pongBuffer = other.dev_pongBuffer;
-		dev_moments = other.dev_moments;
-		dev_momentsPrev = other.dev_momentsPrev;
-		dev_variancePing = other.dev_variancePing;
-		dev_variancePong = other.dev_variancePong;
-		dev_prefilteredVariance = other.dev_prefilteredVariance;
+		directChannel = other.directChannel;
+		indirectChannel = other.indirectChannel;
+		dev_outputColor = other.dev_outputColor;
 
 		other.m_width = 0;
 		other.m_height = 0;
@@ -735,14 +783,9 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 		other.dev_gBuffer_historyLength = nullptr;
 		other.dev_gBuffer_normalDepthPrev = nullptr;
 		other.dev_gBuffer_historyLengthPrev = nullptr;
-		other.dev_illuminationPrev = nullptr;
-		other.dev_pingBuffer = nullptr;
-		other.dev_pongBuffer = nullptr;
-		other.dev_moments = nullptr;
-		other.dev_momentsPrev = nullptr;
-		other.dev_variancePing = nullptr;
-		other.dev_variancePong = nullptr;
-		other.dev_prefilteredVariance = nullptr;
+		other.directChannel = SVGFChannel{};
+		other.indirectChannel = SVGFChannel{};
+		other.dev_outputColor = nullptr;
 
 		m_prevViewProj = other.m_prevViewProj;
 		m_svgfSettings = other.m_svgfSettings;
@@ -759,8 +802,10 @@ SVGFManager::SVGFManager(SVGFManager&& other) noexcept
 void SVGFManager::swapBuffers()
 {
 	std::swap(dev_gBuffer_normalDepth, dev_gBuffer_normalDepthPrev);
-	std::swap(dev_moments, dev_momentsPrev);
 	std::swap(dev_gBuffer_historyLength, dev_gBuffer_historyLengthPrev);
+
+	directChannel.swapBuffers();
+	indirectChannel.swapBuffers();
 }
 
 void SVGFManager::resize(int width, int height)
@@ -774,10 +819,11 @@ void SVGFManager::resize(int width, int height)
 	m_width = width;
 	m_height = height;
 
-	// Old camera matrix is stale once history buffers are reallocated
+	// Reset previous viewproj since the camera was changed due to resizing
 	m_prevViewProj.reset();
 
 	if (m_width > 0 && m_height > 0) {
+		// If width or height is 0, we don't allocate buffers
 		allocateBuffers();
 	}
 }
@@ -823,26 +869,29 @@ void SVGFManager::executeTemporalAccumulation()
 	dim3 blockSize(16, 16);
 	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
 
-	kernTemporalAccumulation << <gridSize, blockSize >> > (
-		dev_gBuffer_normalDepth,
-		dev_gBuffer_motionVectors,
-		dev_gBuffer_normalDepthPrev,
-		dev_pingBuffer,
-		dev_illuminationPrev,
-		dev_momentsPrev,
-		// Outputs
-		dev_pongBuffer,
-		dev_moments,
-		dev_gBuffer_historyLength,
-		dev_gBuffer_historyLengthPrev,
-		m_svgfSettings.colorAlpha,
-		m_svgfSettings.momentsAlpha,
-		m_width,
-		m_height
-		);
+	for (SVGFChannel* channel : { &directChannel, &indirectChannel }) {
+		kernTemporalAccumulation << <gridSize, blockSize >> > (
+			// Inputs
+			dev_gBuffer_normalDepth, // Both channels share normal, motion, and history length buffers
+			dev_gBuffer_motionVectors,
+			dev_gBuffer_normalDepthPrev,
+			channel->dev_pingBuffer,
+			channel->dev_illuminationPrev,
+			channel->dev_momentsPrev,
+			// Outputs
+			channel->dev_pongBuffer,
+			channel->dev_moments,
+			dev_gBuffer_historyLength,
+			dev_gBuffer_historyLengthPrev,
+			m_svgfSettings.colorAlpha,
+			m_svgfSettings.momentsAlpha,
+			m_width,
+			m_height
+			);
 
-	// Swap ping and pong buffers so we can use this output as input for future operations
-	std::swap(dev_pingBuffer, dev_pongBuffer);
+		// Swap ping and pong buffers so we can use this output as input for future operations
+		std::swap(channel->dev_pingBuffer, channel->dev_pongBuffer);
+	}
 }
 
 void SVGFManager::executeVarianceEstimation()
@@ -854,15 +903,17 @@ void SVGFManager::executeVarianceEstimation()
 	dim3 blockSize(16, 16);
 	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
 
-	kernEstimateVariance << <gridSize, blockSize >> > (
-		dev_pingBuffer,
-		dev_moments,
-		dev_gBuffer_normalDepth,
-		dev_gBuffer_historyLength,
-		dev_variancePing,
-		m_width,
-		m_height
-		);
+	for (SVGFChannel* channel : { &directChannel, &indirectChannel }) {
+		kernEstimateVariance << <gridSize, blockSize >> > (
+			channel->dev_pingBuffer,
+			channel->dev_moments,
+			dev_gBuffer_normalDepth, // Both channels share normal, motion, and history length buffers
+			dev_gBuffer_historyLength,
+			channel->dev_variancePing,
+			m_width,
+			m_height
+			);
+	}
 }
 
 void SVGFManager::executeAtrousFilteringPipeline() {
@@ -873,49 +924,66 @@ void SVGFManager::executeAtrousFilteringPipeline() {
 
 	size_t numPixels = static_cast<size_t>(m_width) * m_height;
 
-	if (m_svgfSettings.atrousIterations <= 0) {
-		// No wavelet iterations, so the temporally integrated color becomes next frame's color history
-		CUDA_CHECK(cudaMemcpy(dev_illuminationPrev, dev_pingBuffer, numPixels * sizeof(glm::vec4), cudaMemcpyDeviceToDevice));
-		return;
-	}
-
-	for (int i = 0; i < m_svgfSettings.atrousIterations; ++i) {
-		int stride = 1 << i;
-
-		// Prefilter variance
-		kernVariancePrefilter3x3 << <gridSize, blockSize >> > (
-			dev_variancePing,
-			dev_gBuffer_normalDepth,
-			dev_prefilteredVariance,
-			m_width, m_height
-			);
-
-		kernAtrousFilter << <gridSize, blockSize >> > (
-			dev_pingBuffer,
-			dev_gBuffer_normalDepth,
-			dev_gBuffer_roughness,
-			dev_variancePing,
-			dev_prefilteredVariance,
-			dev_variancePong,
-			dev_pongBuffer,
-			stride,
-			m_svgfSettings.sigmaLuminance,
-			m_svgfSettings.sigmaNormal,
-			m_svgfSettings.sigmaDepth,
-			m_width,
-			m_height
-			);
-
-		if (i == 0) {
-			// Save first iteration of wavelet to next frames color history
-			CUDA_CHECK(cudaMemcpy(dev_illuminationPrev, dev_pongBuffer, numPixels * sizeof(glm::vec4), cudaMemcpyDeviceToDevice));
-
+	for (SVGFChannel* channel : { &directChannel, &indirectChannel }) {
+		if (m_svgfSettings.atrousIterations <= 0) {
+			// No wavelet iterations, so the temporally integrated color becomes next frame's color history
+			CUDA_CHECK(cudaMemcpy(channel->dev_illuminationPrev, channel->dev_pingBuffer, numPixels * sizeof(glm::vec4), cudaMemcpyDeviceToDevice));
+			continue;
 		}
 
-		// Ping pong
-		std::swap(dev_pingBuffer, dev_pongBuffer);
-		std::swap(dev_variancePing, dev_variancePong);
+		for (int i = 0; i < m_svgfSettings.atrousIterations; ++i) {
+			int stride = 1 << i;
+
+			// Prefilter variance
+			kernVariancePrefilter3x3 << <gridSize, blockSize >> > (
+				channel->dev_variancePing,
+				dev_gBuffer_normalDepth,
+				channel->dev_prefilteredVariance,
+				m_width, m_height
+				);
+
+			kernAtrousFilter << <gridSize, blockSize >> > (
+				channel->dev_pingBuffer,
+				dev_gBuffer_normalDepth,
+				dev_gBuffer_roughness,
+				channel->dev_variancePing,
+				channel->dev_prefilteredVariance,
+				channel->dev_variancePong,
+				channel->dev_pongBuffer,
+				stride,
+				m_svgfSettings.sigmaLuminance,
+				m_svgfSettings.sigmaNormal,
+				m_svgfSettings.sigmaDepth,
+				m_width,
+				m_height
+				);
+
+			if (i == 0) {
+				// Save first iteration of wavelet to next frames color history
+				CUDA_CHECK(cudaMemcpy(channel->dev_illuminationPrev, channel->dev_pongBuffer, numPixels * sizeof(glm::vec4), cudaMemcpyDeviceToDevice));
+			}
+
+			// Ping pong
+			std::swap(channel->dev_pingBuffer, channel->dev_pongBuffer);
+			std::swap(channel->dev_variancePing, channel->dev_variancePong);
+		}
 	}
+}
+
+void SVGFManager::combineChannels()
+{
+	if (m_width <= 0 || m_height <= 0) return;
+
+	dim3 blockSize(16, 16);
+	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+
+	kernCombineChannels << <gridSize, blockSize >> > (
+		directChannel.dev_pingBuffer,
+		indirectChannel.dev_pingBuffer,
+		dev_outputColor,
+		m_width,
+		m_height
+		);
 }
 
 void SVGFManager::debugNormals(cudaSurfaceObject_t surface)
@@ -939,14 +1007,16 @@ void SVGFManager::debugIlluminance(cudaSurfaceObject_t surface)
 	dim3 blockSize(16, 16);
 	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
 
-	kernDebugSVGFIllumination << <gridSize, blockSize >> > (dev_pingBuffer, surface, m_width, m_height);
+	kernDebugSVGFIllumination << <gridSize, blockSize >> > (dev_outputColor, surface, m_width, m_height);
 }
 
-void SVGFManager::debugVariance(cudaSurfaceObject_t surface)
+void SVGFManager::debugVariance(cudaSurfaceObject_t surface, bool bIndirect)
 {
 	dim3 blockSize(16, 16);
 	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
-	kernDebugVariance << <gridSize, blockSize >> > (dev_variancePing, surface, m_width, m_height);
+
+	const SVGFChannel& channel = bIndirect ? indirectChannel : directChannel;
+	kernDebugVariance << <gridSize, blockSize >> > (channel.dev_variancePing, surface, m_width, m_height);
 }
 
 void SVGFManager::drawSettingsImGui()
@@ -970,15 +1040,10 @@ void SVGFManager::allocateBuffers()
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_historyLength, numPixels * sizeof(unsigned int)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_historyLengthPrev, numPixels * sizeof(unsigned int)));
 
-	CUDA_CHECK(cudaMalloc(&dev_illuminationPrev, numPixels * sizeof(glm::vec4)));
-	CUDA_CHECK(cudaMalloc(&dev_pingBuffer, numPixels * sizeof(glm::vec4)));
-	CUDA_CHECK(cudaMalloc(&dev_pongBuffer, numPixels * sizeof(glm::vec4)));
+	directChannel.allocate(numPixels);
+	indirectChannel.allocate(numPixels);
 
-	CUDA_CHECK(cudaMalloc(&dev_moments, numPixels * sizeof(glm::vec2)));
-	CUDA_CHECK(cudaMalloc(&dev_momentsPrev, numPixels * sizeof(glm::vec2)));
-	CUDA_CHECK(cudaMalloc(&dev_variancePing, numPixels * sizeof(float)));
-	CUDA_CHECK(cudaMalloc(&dev_variancePong, numPixels * sizeof(float)));
-	CUDA_CHECK(cudaMalloc(&dev_prefilteredVariance, numPixels * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&dev_outputColor, numPixels * sizeof(glm::vec4)));
 
 	// Initialize history tracker sizes to 0
 	CUDA_CHECK(cudaMemset(dev_gBuffer_historyLength, 0, numPixels * sizeof(unsigned int)));
@@ -1010,50 +1075,18 @@ void SVGFManager::freeBuffers()
 		cudaFree(dev_gBuffer_historyLengthPrev);
 	}
 
-	if (dev_illuminationPrev) {
-		cudaFree(dev_illuminationPrev);
+	if (dev_outputColor) {
+		cudaFree(dev_outputColor);
 	}
 
-	if (dev_pingBuffer) {
-		cudaFree(dev_pingBuffer);
-	}
+	directChannel.free();
+	indirectChannel.free();
 
-	if (dev_pongBuffer) {
-		cudaFree(dev_pongBuffer);
-	}
-
-	if (dev_moments) {
-		cudaFree(dev_moments);
-	}
-
-	if (dev_momentsPrev) {
-		cudaFree(dev_momentsPrev);
-	}
-
-	if (dev_variancePing) {
-		cudaFree(dev_variancePing);
-	}
-
-	if (dev_variancePong) {
-		cudaFree(dev_variancePong);
-	}
-
-	if (dev_prefilteredVariance) {
-		cudaFree(dev_prefilteredVariance);
-	}
-
-	dev_gBuffer_normalDepth = nullptr; 
+	dev_gBuffer_normalDepth = nullptr;
 	dev_gBuffer_normalDepthPrev = nullptr;
-	dev_gBuffer_motionVectors = nullptr; 
+	dev_gBuffer_motionVectors = nullptr;
 	dev_gBuffer_roughness = nullptr;
 	dev_gBuffer_historyLength = nullptr;
 	dev_gBuffer_historyLengthPrev = nullptr;
-	dev_illuminationPrev = nullptr;
-	dev_pingBuffer = nullptr; 
-	dev_pongBuffer = nullptr;
-	dev_moments = nullptr; 
-	dev_momentsPrev = nullptr;
-	dev_variancePing = nullptr;
-	dev_variancePong = nullptr;
-	dev_prefilteredVariance = nullptr;
+	dev_outputColor = nullptr;
 }
