@@ -79,13 +79,7 @@ public:
 		const Camera& camera,
 		const std::unique_ptr<Scene>& scene);
 
-	void executeTemporalAccumulation();
-
-	void executeVarianceEstimation();
-
-	void executeAtrousFilteringPipeline();
-
-	void combineChannels();
+	void evaluate();
 
 	void debugNormals(cudaSurfaceObject_t surface);
 
@@ -102,6 +96,7 @@ public:
 	glm::vec2* dev_gBuffer_motionVectors = nullptr;
 	unsigned int* dev_gBuffer_historyLength = nullptr;
 	float* dev_gBuffer_roughness = nullptr;
+	glm::vec3* dev_gBuffer_albedo = nullptr; // Albedo of first hit so we can demodulate and modulate after filtering
 
 	// Previous G Buffers
 	glm::vec4* dev_gBuffer_normalDepthPrev = nullptr;
@@ -115,6 +110,13 @@ public:
 	glm::vec4* dev_outputColor = nullptr;
 
 private:
+	// SVGF Pipeline steps
+	void demodulateAlbedo();
+	void executeTemporalAccumulation();
+	void executeVarianceEstimation();
+	void executeAtrousFilteringPipeline();
+	void combineChannels();
+
 	void allocateBuffers();
 	void freeBuffers();
 

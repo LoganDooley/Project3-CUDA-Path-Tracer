@@ -172,13 +172,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
 
     if (m_renderSettings.bSVGFEnabled) {
         // Run svgf
-        m_svgfManager.executeTemporalAccumulation();
-
-        m_svgfManager.executeVarianceEstimation();
-
-        m_svgfManager.executeAtrousFilteringPipeline();
-
-        m_svgfManager.combineChannels();
+        m_svgfManager.evaluate();
 
         m_svgfManager.debugIlluminance(m_cudaSurfaceObject);
 

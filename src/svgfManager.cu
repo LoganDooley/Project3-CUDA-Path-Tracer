@@ -67,6 +67,7 @@ __global__ void kernCaptureGBuffer(
 	glm::vec4* dev_gBuffer_normalDepth,
 	glm::vec2* dev_gBuffer_motionVectors,
 	float* dev_gBuffer_roughness,
+	glm::vec3* dev_gBuffer_albedo,
 	glm::mat4 currentViewProj,
 	glm::mat4 prevViewProj,
 	int width,
@@ -91,15 +92,40 @@ __global__ void kernCaptureGBuffer(
 	if (depth < 0.0f || depth >= 1e10f) {
 		dev_gBuffer_normalDepth[pixelIdx] = glm::vec4(0.0f, 0.0f, 0.0f, -1.0f);
 		dev_gBuffer_motionVectors[pixelIdx] = glm::vec2(0.0f);
+		dev_gBuffer_albedo[pixelIdx] = glm::vec3(1.0f); // Don't demodulate a miss 
 		return;
 	}
 
 	dev_gBuffer_normalDepth[pixelIdx] = glm::vec4(normal, depth);
-	
+
 	glm::vec2 motionVector = calculateMotionVector(worldPos, currentViewProj, prevViewProj, width, height);
 	dev_gBuffer_motionVectors[pixelIdx] = motionVector;
 
 	dev_gBuffer_roughness[pixelIdx] = 1.0f; // TODO: Remove this buffer
+
+	// Demodulation albedo. Emitters and delta materials keep 1 since what they show isn't their own surface texture
+	glm::vec3 albedo = glm::vec3(1.0f);
+	if (intersectionData.materialIndex >= 0 && (size_t)intersectionData.materialIndex < dev_scene.m_materialCount) {
+		Material material = dev_scene.dev_materials[intersectionData.materialIndex];
+		material.initializeFromIntersection(intersectionData);
+
+		if (material.emittance <= 0.0f && !material.isDelta()) {
+			// Only demodulate non-emissive, non-delta materials
+			albedo = material.albedo;
+		}
+	}
+
+	// Avoid dividing by 0
+	if (albedo.x < 1e-3f) {
+		albedo.x = 1.0f;
+	}
+	if(albedo.y < 1e-3f) {
+		albedo.y = 1.0f;
+	}
+	if(albedo.z < 1e-3f) {
+		albedo.z = 1.0f;
+	}
+	dev_gBuffer_albedo[pixelIdx] = albedo;
 }
 __device__ bool isHistoryValid(
 	glm::vec3 currNormal, float currDepth,
@@ -690,9 +716,31 @@ __global__ void kernDebugVariance(
 	surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
 }
 
+__global__ void kernDemodulateAlbedo(
+	glm::vec4* dev_direct,
+	glm::vec4* dev_indirect,
+	const glm::vec3* dev_gBuffer_albedo,
+	int width, int height)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x >= width || y >= height) return;
+
+	int pixelIndex = y * width + x;
+
+	glm::vec3 albedo = dev_gBuffer_albedo[pixelIndex];
+	glm::vec4 direct = dev_direct[pixelIndex];
+	glm::vec4 indirect = dev_indirect[pixelIndex];
+
+	dev_direct[pixelIndex] = glm::vec4(glm::vec3(direct) / albedo, direct.w);
+	dev_indirect[pixelIndex] = glm::vec4(glm::vec3(indirect) / albedo, indirect.w);
+}
+
 __global__ void kernCombineChannels(
 	const glm::vec4* dev_direct,
 	const glm::vec4* dev_indirect,
+	const glm::vec3* dev_gBuffer_albedo,
 	glm::vec4* dev_outputColor,
 	int width, int height)
 {
@@ -706,8 +754,10 @@ __global__ void kernCombineChannels(
 	glm::vec4 direct = dev_direct[pixelIndex];
 	glm::vec4 indirect = dev_indirect[pixelIndex];
 
+	// Remodulate with the albedo
+	glm::vec3 albedo = dev_gBuffer_albedo[pixelIndex];
 	// Use direct.w, but both have the same w value
-	dev_outputColor[pixelIndex] = glm::vec4(glm::vec3(direct) + glm::vec3(indirect), direct.w);
+	dev_outputColor[pixelIndex] = glm::vec4((glm::vec3(direct) + glm::vec3(indirect)) * albedo, direct.w);
 }
 
 void SVGFChannel::allocate(size_t numPixels)
@@ -768,6 +818,7 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 		dev_gBuffer_normalDepth = other.dev_gBuffer_normalDepth;
 		dev_gBuffer_motionVectors = other.dev_gBuffer_motionVectors;
 		dev_gBuffer_roughness = other.dev_gBuffer_roughness;
+		dev_gBuffer_albedo = other.dev_gBuffer_albedo;
 		dev_gBuffer_historyLength = other.dev_gBuffer_historyLength;
 		dev_gBuffer_normalDepthPrev = other.dev_gBuffer_normalDepthPrev;
 		dev_gBuffer_historyLengthPrev = other.dev_gBuffer_historyLengthPrev;
@@ -780,6 +831,7 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 		other.dev_gBuffer_normalDepth = nullptr;
 		other.dev_gBuffer_motionVectors = nullptr;
 		other.dev_gBuffer_roughness = nullptr;
+		other.dev_gBuffer_albedo = nullptr;
 		other.dev_gBuffer_historyLength = nullptr;
 		other.dev_gBuffer_normalDepthPrev = nullptr;
 		other.dev_gBuffer_historyLengthPrev = nullptr;
@@ -849,6 +901,7 @@ void SVGFManager::captureGBuffer(
 		dev_gBuffer_normalDepth,
 		dev_gBuffer_motionVectors,
 		dev_gBuffer_roughness,
+		dev_gBuffer_albedo,
 		currentViewProj,
 		prevViewProj,
 		m_width,
@@ -858,6 +911,37 @@ void SVGFManager::captureGBuffer(
 		);
 
 	m_prevViewProj = currentViewProj;
+}
+
+void SVGFManager::evaluate()
+{
+	if (m_width <= 0 || m_height <= 0) {
+		return;
+	}
+	demodulateAlbedo();
+	executeTemporalAccumulation();
+	executeVarianceEstimation();
+	executeAtrousFilteringPipeline();
+	combineChannels();
+}
+
+void SVGFManager::demodulateAlbedo()
+{
+	if (m_width <= 0 || m_height <= 0) {
+		return;
+	}
+
+	dim3 blockSize(16, 16);
+	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+
+	// First demodulate before accumulating
+	kernDemodulateAlbedo << <gridSize, blockSize >> > (
+		directChannel.dev_pingBuffer,
+		indirectChannel.dev_pingBuffer,
+		dev_gBuffer_albedo,
+		m_width,
+		m_height
+		);
 }
 
 void SVGFManager::executeTemporalAccumulation()
@@ -980,6 +1064,7 @@ void SVGFManager::combineChannels()
 	kernCombineChannels << <gridSize, blockSize >> > (
 		directChannel.dev_pingBuffer,
 		indirectChannel.dev_pingBuffer,
+		dev_gBuffer_albedo,
 		dev_outputColor,
 		m_width,
 		m_height
@@ -1037,6 +1122,7 @@ void SVGFManager::allocateBuffers()
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_normalDepthPrev, numPixels * sizeof(glm::vec4)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_motionVectors, numPixels * sizeof(glm::vec2)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_roughness, numPixels * sizeof(float)));
+	CUDA_CHECK(cudaMalloc(&dev_gBuffer_albedo, numPixels * sizeof(glm::vec3)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_historyLength, numPixels * sizeof(unsigned int)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_historyLengthPrev, numPixels * sizeof(unsigned int)));
 
@@ -1067,6 +1153,10 @@ void SVGFManager::freeBuffers()
 		cudaFree(dev_gBuffer_roughness);
 	}
 
+	if (dev_gBuffer_albedo) {
+		cudaFree(dev_gBuffer_albedo);
+	}
+
 	if (dev_gBuffer_historyLength) {
 		cudaFree(dev_gBuffer_historyLength);
 	}
@@ -1086,6 +1176,7 @@ void SVGFManager::freeBuffers()
 	dev_gBuffer_normalDepthPrev = nullptr;
 	dev_gBuffer_motionVectors = nullptr;
 	dev_gBuffer_roughness = nullptr;
+	dev_gBuffer_albedo = nullptr;
 	dev_gBuffer_historyLength = nullptr;
 	dev_gBuffer_historyLengthPrev = nullptr;
 	dev_outputColor = nullptr;
