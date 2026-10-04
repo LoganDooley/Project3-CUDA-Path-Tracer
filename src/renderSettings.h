@@ -6,10 +6,18 @@ enum class BvhHeatmapMode : int {
 	Tlas = 2
 };
 
+// Mode for light sampling so we can test different strategies
+enum class LightSamplingMode : int {
+	BrdfOnly = 0,
+	NeeOnly = 1,
+	Mis = 2
+};
+
 struct RenderSettings {
 	bool bMSAAEnabled = true;
 	bool bSVGFEnabled = false;
 	int maxBounces = 6;
+	LightSamplingMode lightSamplingMode = LightSamplingMode::Mis;
 
 	bool bStreamCompactionEnabled = false;
 	bool bSortPathsByMaterial = false;

@@ -205,6 +205,7 @@ __global__ void kernShade(
     glm::vec4* dev_currentDirectColor,
     glm::vec4* dev_currentIndirectColor,
     unsigned int* dev_sampleCounts,
+    LightSamplingMode lightSamplingMode,
     int iteration,
     int frameIndex)
 {
@@ -249,8 +250,15 @@ __global__ void kernShade(
         float lightPdf = intersectionData.pdfIfLight;
 
         float misWeight = 1.0f;
-        if (!pathState.previousDelta && (pathState.previousBrdfPdf + lightPdf) > 0.0f) {
-			misWeight = MathHelpers::powerHeuristic(pathState.previousBrdfPdf, lightPdf);
+        if (!pathState.previousDelta) {
+            // MIS only applies to non-delta distributions, since otherwise the pdf will evaluate to 0 anyways
+            if (lightSamplingMode == LightSamplingMode::NeeOnly) {
+                // Ignore since we only do NEE
+                misWeight = 0.0f;
+            }
+            else if (lightSamplingMode == LightSamplingMode::Mis && (pathState.previousBrdfPdf + lightPdf) > 0.0f) {
+                misWeight = MathHelpers::powerHeuristic(pathState.previousBrdfPdf, lightPdf);
+            }
         }
 
 		// Considered direct if from the camera or off of the first bounce
@@ -267,7 +275,8 @@ __global__ void kernShade(
     thrust::uniform_real_distribution<float> u01(0, 1);
     
     // Next Event Estimation (Sample lights)
-    if (!material.isDelta()) {
+    if (!material.isDelta() && lightSamplingMode != LightSamplingMode::BrdfOnly) {
+		// Only do NEE for non-delta materials and if we are not only sampling the BRDF
         glm::vec4 neeRandom = glm::vec4(u01(rng), u01(rng), u01(rng), u01(rng));
 		glm::vec3 directionToLight = glm::vec3(0.0f);
         float lightPdf = 0.0f;
@@ -280,7 +289,7 @@ __global__ void kernShade(
 			glm::vec3 f = material.evaluate(intersectionData.normal, wi, directionToLight, intersectionData.bInside);
 			float pdfBrdf = material.pdf(intersectionData.normal, wi, directionToLight, intersectionData.bInside);
 
-			float misWeight = MathHelpers::powerHeuristic(lightPdf, pdfBrdf);
+			float misWeight = (lightSamplingMode == LightSamplingMode::Mis) ? MathHelpers::powerHeuristic(lightPdf, pdfBrdf) : 1.0f;
 
             float cosThetaNE = glm::max(0.0f, glm::abs(glm::dot(intersectionData.normal, directionToLight)));
             // Considered direct if we are doing NEE off of the first bounce
@@ -495,6 +504,7 @@ void launchShadeKernel(PathState* dev_pathStates,
     glm::vec4* dev_currentDirectColor,
     glm::vec4* dev_currentIndirectColor,
     unsigned int* dev_sampleCounts,
+    LightSamplingMode lightSamplingMode,
     int iteration,
     int frameIndex)
 {
@@ -510,6 +520,7 @@ void launchShadeKernel(PathState* dev_pathStates,
         dev_currentDirectColor,
         dev_currentIndirectColor,
         dev_sampleCounts,
+        lightSamplingMode,
         iteration,
         frameIndex);
 }

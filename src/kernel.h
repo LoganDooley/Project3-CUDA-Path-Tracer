@@ -31,6 +31,7 @@ void launchShadeKernel(PathState* dev_pathStates,
 	glm::vec4* dev_currentDirectColor,
 	glm::vec4* dev_currentIndirectColor,
 	unsigned int* dev_sampleCounts,
+	LightSamplingMode lightSamplingMode,
 	int iteration,
 	int frameIndex);
 

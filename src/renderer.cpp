@@ -139,6 +139,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             m_renderSettings.bSVGFEnabled ? m_svgfManager.directChannel.dev_pingBuffer : nullptr,
             m_renderSettings.bSVGFEnabled ? m_svgfManager.indirectChannel.dev_pingBuffer : nullptr,
             dev_sampleCounts,
+            m_renderSettings.lightSamplingMode,
             i,
             m_frameIndex);
 
@@ -256,6 +257,15 @@ void Renderer::drawRenderSettingsImGui(Camera& camera)
             m_svgfManager.resize(0, 0);
 		}
     }
+
+    // Sampling settings
+    const char* lightSamplingLabels[] = { "BRDF Only", "NEE Only", "MIS" };
+    int lightSamplingMode = static_cast<int>(m_renderSettings.lightSamplingMode);
+    if (ImGui::Combo("Light Sampling", &lightSamplingMode, lightSamplingLabels, IM_ARRAYSIZE(lightSamplingLabels))) {
+        m_renderSettings.lightSamplingMode = static_cast<LightSamplingMode>(lightSamplingMode);
+        camera.m_hasChanged = true;
+    }
+
     // Performance settings
     if (ImGui::SliderInt("Max Bounces", &m_renderSettings.maxBounces, 1, 32)) {
         camera.m_hasChanged = true;
