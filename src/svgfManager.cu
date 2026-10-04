@@ -1,4 +1,5 @@
 #include "svgfManager.h"
+#include "cudaHelpers.h"
 
 #include "intersection.h"
 #include "material.h"
@@ -868,7 +869,7 @@ void SVGFManager::captureGBuffer(
 	if (activePathCount <= 0) return;
 
 	int blockSize = 256;
-	int gridSize = (activePathCount + blockSize - 1) / blockSize;
+	int gridSize = divup(activePathCount, blockSize);
 
 	glm::mat4 currentViewProj = camera.getViewProjectionMatrix(m_width, m_height);
 	glm::mat4 prevViewProj = m_prevViewProj.has_value() ? m_prevViewProj.value() : currentViewProj;
@@ -909,7 +910,7 @@ void SVGFManager::demodulateAlbedo()
 	}
 
 	dim3 blockSize(16, 16);
-	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
 
 	// First demodulate before accumulating
 	kernDemodulateAlbedo << <gridSize, blockSize >> > (
@@ -928,7 +929,7 @@ void SVGFManager::executeTemporalAccumulation()
 	}
 
 	dim3 blockSize(16, 16);
-	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
 
 	for (SVGFChannel* channel : { &directChannel, &indirectChannel }) {
 		kernTemporalAccumulation << <gridSize, blockSize >> > (
@@ -962,7 +963,7 @@ void SVGFManager::executeVarianceEstimation()
 	}
 
 	dim3 blockSize(16, 16);
-	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
 
 	for (SVGFChannel* channel : { &directChannel, &indirectChannel }) {
 		kernEstimateVariance << <gridSize, blockSize >> > (
@@ -981,7 +982,7 @@ void SVGFManager::executeAtrousFilteringPipeline() {
 	if (m_width <= 0 || m_height <= 0) return;
 
 	dim3 blockSize(16, 16);
-	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
 
 	size_t numPixels = static_cast<size_t>(m_width) * m_height;
 
@@ -1035,7 +1036,7 @@ void SVGFManager::combineChannels()
 	if (m_width <= 0 || m_height <= 0) return;
 
 	dim3 blockSize(16, 16);
-	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
 
 	kernCombineChannels << <gridSize, blockSize >> > (
 		directChannel.dev_pingBuffer,
@@ -1050,7 +1051,7 @@ void SVGFManager::combineChannels()
 void SVGFManager::debugNormals(cudaSurfaceObject_t surface)
 {
 	dim3 blockSize(16, 16);
-	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
 
 	kernDebugNormals << <gridSize, blockSize >> > (dev_gBuffer_normalDepth, surface, m_width, m_height);
 }
@@ -1058,7 +1059,7 @@ void SVGFManager::debugNormals(cudaSurfaceObject_t surface)
 void SVGFManager::debugMotionVectors(cudaSurfaceObject_t surface)
 {
 	dim3 blockSize(16, 16);
-	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
 
 	kernDebugMotionVectors << <gridSize, blockSize >> > (dev_gBuffer_motionVectors, surface, m_width, m_height);
 }
@@ -1066,7 +1067,7 @@ void SVGFManager::debugMotionVectors(cudaSurfaceObject_t surface)
 void SVGFManager::debugIlluminance(cudaSurfaceObject_t surface)
 {
 	dim3 blockSize(16, 16);
-	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
 
 	kernDebugSVGFIllumination << <gridSize, blockSize >> > (dev_outputColor, surface, m_width, m_height);
 }
@@ -1074,7 +1075,7 @@ void SVGFManager::debugIlluminance(cudaSurfaceObject_t surface)
 void SVGFManager::debugVariance(cudaSurfaceObject_t surface, bool bIndirect)
 {
 	dim3 blockSize(16, 16);
-	dim3 gridSize((m_width + blockSize.x - 1) / blockSize.x, (m_height + blockSize.y - 1) / blockSize.y);
+	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
 
 	const SVGFChannel& channel = bIndirect ? indirectChannel : directChannel;
 	kernDebugVariance << <gridSize, blockSize >> > (channel.dev_variancePing, surface, m_width, m_height);

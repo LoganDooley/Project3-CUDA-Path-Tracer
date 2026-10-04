@@ -1,4 +1,5 @@
 #include "kernel.h"
+#include "cudaHelpers.h"
 
 #include <thrust/execution_policy.h>
 #include <thrust/random.h>
@@ -36,10 +37,6 @@ thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int de
     return thrust::default_random_engine(h);
 }
 
-
-__host__ __device__ int divup(int a, int b) {
-    return (a + b - 1) / b;
-}
 
 __device__ void get2DIndex(int index1D, int width, int* outX, int* outY) {
     *outX = index1D % width;
@@ -479,7 +476,7 @@ void launchCameraRayGenKernel(
     bool bMSAAEnabled)
 {
     dim3 blockSize(16, 16);
-    dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
+    dim3 gridSize = make2DGrid(width, height, blockSize);
 
     kernGenerateCameraRays << <gridSize, blockSize >> > (
         dev_pathStates, width, height,
@@ -577,7 +574,7 @@ void launchBvhHeatmapKernel(PathState* dev_pathStates,
 void launchDebugUVKernel(IntersectionData* dev_intersectionData, cudaSurfaceObject_t surface, int width, int height)
 {
     dim3 blockSize(16, 16);
-    dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
+    dim3 gridSize = make2DGrid(width, height, blockSize);
 	kernDebugUV << <gridSize, blockSize >> > (surface, dev_intersectionData, width * height, width);
 }
 
