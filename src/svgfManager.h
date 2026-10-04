@@ -95,7 +95,6 @@ public:
 	glm::vec4* dev_gBuffer_normalDepth = nullptr;
 	glm::vec2* dev_gBuffer_motionVectors = nullptr;
 	unsigned int* dev_gBuffer_historyLength = nullptr;
-	float* dev_gBuffer_roughness = nullptr;
 	glm::vec3* dev_gBuffer_albedo = nullptr; // Albedo of first hit so we can demodulate and modulate after filtering
 
 	// Previous G Buffers

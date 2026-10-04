@@ -56,18 +56,11 @@ __device__ float computeLuminance(const glm::vec3& color)
 	return luminance;
 }
 
-__device__ float getRoughnessFromExponent(float exponent) {
-	float roughness = (exponent - 1000.0f) / (1.0f - 1000.0f);
-
-	return glm::clamp(roughness, 0.0f, 1.0f);
-}
-
 __global__ void kernCaptureGBuffer(
 	const PathState* dev_pathStates,
 	const IntersectionData* dev_intersectionData,
 	glm::vec4* dev_gBuffer_normalDepth,
 	glm::vec2* dev_gBuffer_motionVectors,
-	float* dev_gBuffer_roughness,
 	glm::vec3* dev_gBuffer_albedo,
 	glm::mat4 currentViewProj,
 	glm::mat4 prevViewProj,
@@ -101,8 +94,6 @@ __global__ void kernCaptureGBuffer(
 
 	glm::vec2 motionVector = calculateMotionVector(worldPos, currentViewProj, prevViewProj, width, height);
 	dev_gBuffer_motionVectors[pixelIdx] = motionVector;
-
-	dev_gBuffer_roughness[pixelIdx] = 1.0f; // TODO: Remove this buffer
 
 	// Demodulation albedo. Emitters and delta materials keep 1 since what they show isn't their own surface texture
 	glm::vec3 albedo = glm::vec3(1.0f);
@@ -501,7 +492,6 @@ __device__ float computeTotalWeight(
 __global__ void kernAtrousFilter(
 	const glm::vec4* dev_inputColor,
 	const glm::vec4* dev_gBuffer_normalDepth,
-	const float* dev_gBuffer_roughness,
 	const float* dev_inputVariance,
 	const float* dev_prefilteredVariance,
 	float* dev_outputVariance,
@@ -535,10 +525,6 @@ __global__ void kernAtrousFilter(
 	float luminanceP = computeLuminance(glm::vec3(colorP));
 	float varianceP = dev_inputVariance[pixelIndex];
 	float prefilteredVarianceP = dev_prefilteredVariance[pixelIndex];
-	float roughnessP = dev_gBuffer_roughness[pixelIndex];
-
-	// If roughness = 0, scale is 0. If roughness = 1, scale is 1 like normal
-	float kernelScale = roughnessP * roughnessP;
 
 	// h filter kernel 
 	const float h[5] = { 1.0f/16.0f, 1.0f/4.0f, 3.0f/8.0f, 1.0f/4.0f, 1.0f/16.0f };
@@ -562,10 +548,8 @@ __global__ void kernAtrousFilter(
 			}
 
 			// Calculate neighbor index
-			float offsetX = c * stride * kernelScale;
-			float offsetY = r * stride * kernelScale;
-			int nx = glm::clamp((int)round(x + offsetX), 0, width - 1);
-			int ny = glm::clamp((int)round(y + offsetY), 0, height - 1);
+			int nx = glm::clamp(x + c * stride, 0, width - 1);
+			int ny = glm::clamp(y + r * stride, 0, height - 1);
 			glm::ivec2 q = glm::ivec2(nx, ny);
 			int neighborIndex = ny * width + nx;
 
@@ -813,7 +797,6 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 
 		dev_gBuffer_normalDepth = other.dev_gBuffer_normalDepth;
 		dev_gBuffer_motionVectors = other.dev_gBuffer_motionVectors;
-		dev_gBuffer_roughness = other.dev_gBuffer_roughness;
 		dev_gBuffer_albedo = other.dev_gBuffer_albedo;
 		dev_gBuffer_historyLength = other.dev_gBuffer_historyLength;
 		dev_gBuffer_normalDepthPrev = other.dev_gBuffer_normalDepthPrev;
@@ -826,7 +809,6 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 		other.m_height = 0;
 		other.dev_gBuffer_normalDepth = nullptr;
 		other.dev_gBuffer_motionVectors = nullptr;
-		other.dev_gBuffer_roughness = nullptr;
 		other.dev_gBuffer_albedo = nullptr;
 		other.dev_gBuffer_historyLength = nullptr;
 		other.dev_gBuffer_normalDepthPrev = nullptr;
@@ -896,7 +878,6 @@ void SVGFManager::captureGBuffer(
 		dev_intersectionData,
 		dev_gBuffer_normalDepth,
 		dev_gBuffer_motionVectors,
-		dev_gBuffer_roughness,
 		dev_gBuffer_albedo,
 		currentViewProj,
 		prevViewProj,
@@ -1025,7 +1006,6 @@ void SVGFManager::executeAtrousFilteringPipeline() {
 			kernAtrousFilter << <gridSize, blockSize >> > (
 				channel->dev_pingBuffer,
 				dev_gBuffer_normalDepth,
-				dev_gBuffer_roughness,
 				channel->dev_variancePing,
 				channel->dev_prefilteredVariance,
 				channel->dev_variancePong,
@@ -1117,7 +1097,6 @@ void SVGFManager::allocateBuffers()
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_normalDepth, numPixels * sizeof(glm::vec4)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_normalDepthPrev, numPixels * sizeof(glm::vec4)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_motionVectors, numPixels * sizeof(glm::vec2)));
-	CUDA_CHECK(cudaMalloc(&dev_gBuffer_roughness, numPixels * sizeof(float)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_albedo, numPixels * sizeof(glm::vec3)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_historyLength, numPixels * sizeof(unsigned int)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_historyLengthPrev, numPixels * sizeof(unsigned int)));
@@ -1145,10 +1124,6 @@ void SVGFManager::freeBuffers()
 		cudaFree(dev_gBuffer_motionVectors);
 	}
 
-	if (dev_gBuffer_roughness) {
-		cudaFree(dev_gBuffer_roughness);
-	}
-
 	if (dev_gBuffer_albedo) {
 		cudaFree(dev_gBuffer_albedo);
 	}
@@ -1171,7 +1146,6 @@ void SVGFManager::freeBuffers()
 	dev_gBuffer_normalDepth = nullptr;
 	dev_gBuffer_normalDepthPrev = nullptr;
 	dev_gBuffer_motionVectors = nullptr;
-	dev_gBuffer_roughness = nullptr;
 	dev_gBuffer_albedo = nullptr;
 	dev_gBuffer_historyLength = nullptr;
 	dev_gBuffer_historyLengthPrev = nullptr;
