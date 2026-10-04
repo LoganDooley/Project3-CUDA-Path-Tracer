@@ -58,9 +58,7 @@ __device__ glm::vec3 Material::evaluate(const glm::vec3& n, const glm::vec3& wi,
 			float dotIH = glm::max(0.0f, glm::dot(wi, H));
 			float etaI = bInside ? ior : 1.0f;
 			float etaT = bInside ? 1.0f : ior;
-			float r0 = (etaI - etaT) / (etaI + etaT);
-			r0 = r0 * r0;
-			float F = r0 + (1.0f - r0) * glm::pow(1.0f - dotIH, 5.0f);
+			float F = Microfacet::F_SchlickDielectric(dotIH, etaI, etaT);
 
 			glm::vec3 diffuseComponent = (1.0f - F) * (albedo / glm::pi<float>()) * (1.0f - pbr.metallic) * (1.0f - pbr.transmission);
 			return diffuseComponent + specularComponent;
@@ -140,9 +138,7 @@ __device__ void Material::sample(
 		// Glass
 		float etaI = bInside ? ior : 1.0f;
 		float etaT = bInside ? 1.0f : ior;
-		float r0 = (etaI - etaT) / (etaI + etaT);
-		r0 = r0 * r0;
-		float F = r0 + (1.0f - r0) * glm::pow(1.0f - cosThetaI, 5.0f);
+		float F = Microfacet::F_SchlickDielectric(cosThetaI, etaI, etaT);
 
 		float eta = etaI / etaT;
 		glm::vec3 refracted = glm::refract(-wi, n, eta);

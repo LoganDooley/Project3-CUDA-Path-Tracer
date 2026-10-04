@@ -69,6 +69,13 @@ namespace Microfacet {
 		return f0 + (glm::vec3(1.0f) - f0) * glm::pow(1.0f - glm::max(0.0f, dotLH), 5.0f);
 	}
 
+	// Schlick Fresnel for traversing from etaI into etaT
+	__device__ inline float F_SchlickDielectric(float cosTheta, float etaI, float etaT) {
+		float r0 = (etaI - etaT) / (etaI + etaT);
+		r0 = r0 * r0;
+		return r0 + (1.0f - r0) * glm::pow(1.0f - glm::max(0.0f, cosTheta), 5.0f);
+	}
+
 	// Samplers
 	__device__ inline glm::vec3 Sample_BlinnPhong(const glm::vec2& random, float specularExponent) {
 		float cosTheta = glm::pow(random.x, 1.0f / (specularExponent + 1.0f));
@@ -123,9 +130,7 @@ struct MicrofacetScattering {
 			return 1.0f;
 		}
 
-		float r0 = (etaI - etaT) / (etaI + etaT);
-		r0 = r0 * r0;
-		float F = r0 + (1.0f - r0) * glm::pow(1.0f - dotIH, 5.0f);
+		float F = Microfacet::F_SchlickDielectric(dotIH, etaI, etaT);
 		return glm::clamp(F, 0.10f, 0.90f);
 	}
 
@@ -183,9 +188,7 @@ struct MicrofacetScattering {
 				? Microfacet::G_VCavity(dotNH, cosThetaI, absCosThetaO, dotOH)
 				: Microfacet::G_SmithGGX(cosThetaI, absCosThetaO, alpha);
 
-			float r0 = (etaI - etaT) / (etaI + etaT);
-			r0 = r0 * r0;
-			float F = r0 + (1.0f - r0) * glm::pow(1.0f - dotIH, 5.0f);
+			float F = Microfacet::F_SchlickDielectric(dotIH, etaI, etaT);
 
 			float sqrtDenom = dotIH + (etaT / etaI) * dotOH;
 			if(glm::abs(sqrtDenom) < 1e-6f) {
