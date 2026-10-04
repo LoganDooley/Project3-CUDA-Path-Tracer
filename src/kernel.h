@@ -47,10 +47,6 @@ void launchColorSurfaceKernel(PathState* dev_pathStates,
 	unsigned int* dev_sampleCounts,
 	int width);
 
-void launchDebugRaysKernel(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height);
-
-void launchColorKernel(cudaSurfaceObject_t surface, int width, int height, float r, float g, float b);
-
 void launchDebugUVKernel(IntersectionData* dev_intersectionData, cudaSurfaceObject_t surface, int width, int height);
 
 // Draw bvh heatmap to the surface. Should be called after the first intersect kernel.
