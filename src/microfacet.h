@@ -179,14 +179,15 @@ struct MicrofacetScattering {
 
 			float dotNH = glm::max(0.0f, glm::dot(n, H));
 			float dotIH = glm::max(0.0f, glm::dot(wi, H));
-			float dotOH = glm::max(0.0f, glm::dot(wo, H));
+			float dotOH = glm::dot(wo, H);
+			float absDotOH = glm::abs(dotOH);
 
 			float D = (model == DistributionModel::BlinnPhong)
 				? Microfacet::D_BlinnPhong(dotNH, specularExponent) 
 				: Microfacet::D_GGX(dotNH, alpha);
 
 			float G = (model == DistributionModel::BlinnPhong)
-				? Microfacet::G_VCavity(dotNH, cosThetaI, absCosThetaO, dotOH)
+				? Microfacet::G_VCavity(dotNH, cosThetaI, absCosThetaO, absDotOH)
 				: Microfacet::G_SmithGGX(cosThetaI, absCosThetaO, alpha);
 
 			float F = Microfacet::F_SchlickDielectric(dotIH, etaI, etaT);
@@ -230,7 +231,6 @@ struct MicrofacetScattering {
 
 		float dotNH = glm::max(0.0f, glm::dot(n, H));
 		float dotIH = glm::max(0.0f, glm::dot(wi, H));
-		float dotOH = glm::max(0.0f, glm::dot(wo, H));
 
 		float pdfHalf = (model == DistributionModel::BlinnPhong)
 			? Microfacet::PDF_BlinnPhong(dotNH, specularExponent)
@@ -245,6 +245,8 @@ struct MicrofacetScattering {
 			return (pdfHalf / (4.0f * dotIH)) * reflectionProb;
 		}
 		else {
+			float dotOH = glm::dot(wo, H);
+			float absDotOH = glm::abs(dotOH);
 			float sqrtDenom = dotIH + (etaT / etaI) * dotOH;
 			if (glm::abs(sqrtDenom) < 1e-6f) {
 				return 0.0f;
@@ -252,7 +254,7 @@ struct MicrofacetScattering {
 
 			// Matching pdf with sample() for transmission
 			float transmissionProb = 1.0f - reflectionProb;
-			return (pdfHalf * (etaT * etaT / (etaI * etaI)) * dotOH / (sqrtDenom * sqrtDenom)) * transmissionProb;
+			return (pdfHalf * (etaT * etaT / (etaI * etaI)) * absDotOH / (sqrtDenom * sqrtDenom)) * transmissionProb;
 		}
 	}
 
@@ -339,8 +341,8 @@ struct MicrofacetScattering {
 
 			float cosThetaO = glm::dot(n, out_wo);
 			float absCosThetaO = glm::abs(cosThetaO);
-			float dotOH = glm::max(0.0f, glm::abs(glm::dot(out_wo, H)));
-
+			float dotOH = glm::dot(out_wo, H);
+			float absDotOH = glm::abs(dotOH);
 
 			float sqrtDenom = dotIH + (etaT / etaI) * dotOH;
 			if (glm::abs(sqrtDenom) < 1e-6f) { 
@@ -352,7 +354,7 @@ struct MicrofacetScattering {
 			glm::vec3 f = evaluate(n, wi, out_wo, bInside);
 			float transmissionProb = 1.0f - reflectionProb;
 
-			out_pdf = (pdfHalf * (etaT * etaT / (etaI * etaI)) * dotOH / (sqrtDenom * sqrtDenom)) * transmissionProb;
+			out_pdf = (pdfHalf * (etaT * etaT / (etaI * etaI)) * absDotOH / (sqrtDenom * sqrtDenom)) * transmissionProb;
 			out_throughput = (out_pdf <= 0.0f) 
 				? glm::vec3(0.0f) 
 				: (f * absCosThetaO) / out_pdf;
