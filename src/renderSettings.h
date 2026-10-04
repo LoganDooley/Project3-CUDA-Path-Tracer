@@ -9,6 +9,7 @@ enum class BvhHeatmapMode : int {
 struct RenderSettings {
 	bool bMSAAEnabled = true;
 	bool bSVGFEnabled = false;
+	int maxBounces = 6;
 
 	bool bStreamCompactionEnabled = false;
 	bool bSortPathsByMaterial = false;

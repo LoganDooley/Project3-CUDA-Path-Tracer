@@ -89,7 +89,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
 
     int initialActivePathCount = getPixelCount();
     int currentActivePathCount = initialActivePathCount;
-    int maxBounces = 6;
+    int maxBounces = m_renderSettings.maxBounces;
 
     launchCameraRayGenKernel(
         dev_pathStates,
@@ -253,6 +253,9 @@ void Renderer::drawRenderSettingsImGui(Camera& camera)
 		}
     }
     // Performance settings
+    if (ImGui::SliderInt("Max Bounces", &m_renderSettings.maxBounces, 1, 32)) {
+        camera.m_hasChanged = true;
+    }
     ImGui::Checkbox("Use Stream Compaction:", &m_renderSettings.bStreamCompactionEnabled);
 	ImGui::Checkbox("Sort Paths by Material:", &m_renderSettings.bSortPathsByMaterial);
 
