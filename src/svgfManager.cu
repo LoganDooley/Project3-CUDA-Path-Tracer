@@ -57,6 +57,7 @@ __global__ void kernCaptureGBuffer(
 	glm::vec4* dev_gBuffer_normalDepth,
 	glm::vec2* dev_gBuffer_motionVectors,
 	glm::vec3* dev_gBuffer_albedo,
+	int* dev_gBuffer_geometryId,
 	glm::mat4 currentViewProj,
 	glm::mat4 prevViewProj,
 	int width,
@@ -82,10 +83,12 @@ __global__ void kernCaptureGBuffer(
 		dev_gBuffer_normalDepth[pixelIdx] = glm::vec4(0.0f, 0.0f, 0.0f, -1.0f);
 		dev_gBuffer_motionVectors[pixelIdx] = glm::vec2(0.0f);
 		dev_gBuffer_albedo[pixelIdx] = glm::vec3(1.0f); // Don't demodulate a miss 
+		dev_gBuffer_geometryId[pixelIdx] = -1;
 		return;
 	}
 
 	dev_gBuffer_normalDepth[pixelIdx] = glm::vec4(normal, depth);
+	dev_gBuffer_geometryId[pixelIdx] = intersectionData.geometryIndex;
 
 	glm::vec2 motionVector = calculateMotionVector(worldPos, currentViewProj, prevViewProj, width, height);
 	dev_gBuffer_motionVectors[pixelIdx] = motionVector;
@@ -98,7 +101,7 @@ __global__ void kernCaptureGBuffer(
 
 		if (material.emittance <= 0.0f && !material.isDelta()) {
 			// Only demodulate non-emissive, non-delta materials
-			albedo = material.albedo;
+			albedo = material.getDemodulationAlbedo();
 		}
 	}
 
@@ -107,10 +110,15 @@ __global__ void kernCaptureGBuffer(
 	dev_gBuffer_albedo[pixelIdx] = glm::max(albedo, glm::vec3(minDemodulationAlbedo));
 }
 __device__ bool isHistoryValid(
-	glm::vec3 currNormal, float currDepth,
-	glm::vec3 prevNormal, float prevDepth
+	glm::vec3 currNormal, float currDepth, int currGeometryId,
+	glm::vec3 prevNormal, float prevDepth, int prevGeometryId
 )
 {
+	// Don't let history bleed across different objects
+	if (currGeometryId != prevGeometryId) {
+		return false;
+	}
+
 	float normalSimilarity = glm::dot(currNormal, prevNormal);
 	float depthDifference = glm::abs(currDepth - prevDepth) / glm::max(currDepth, 0.0001f);
 
@@ -121,6 +129,8 @@ __global__ void kernTemporalAccumulation(
 	const glm::vec4* dev_gBuffer_normalDepth,
 	const glm::vec2* dev_gBuffer_motionVectors,
 	const glm::vec4* dev_gBuffer_normalDepthPrev,
+	const int* dev_gBuffer_geometryId,
+	const int* dev_gBuffer_geometryIdPrev,
 	const glm::vec4* dev_pingBuffer,      
 	const glm::vec4* dev_illuminationPrev,
 	const glm::vec2* dev_momentsPrev,
@@ -188,10 +198,11 @@ __global__ void kernTemporalAccumulation(
 	glm::vec4 nd11 = dev_gBuffer_normalDepthPrev[idx11];
 
 	// Check neighborhood validity
-	bool v00 = isHistoryValid(currentNormal, currentDepth, glm::vec3(nd00), nd00.w);
-	bool v10 = isHistoryValid(currentNormal, currentDepth, glm::vec3(nd10), nd10.w);
-	bool v01 = isHistoryValid(currentNormal, currentDepth, glm::vec3(nd01), nd01.w);
-	bool v11 = isHistoryValid(currentNormal, currentDepth, glm::vec3(nd11), nd11.w);
+	int currentGeometryId = dev_gBuffer_geometryId[pixelIndex];
+	bool v00 = isHistoryValid(currentNormal, currentDepth, currentGeometryId, glm::vec3(nd00), nd00.w, dev_gBuffer_geometryIdPrev[idx00]);
+	bool v10 = isHistoryValid(currentNormal, currentDepth, currentGeometryId, glm::vec3(nd10), nd10.w, dev_gBuffer_geometryIdPrev[idx10]);
+	bool v01 = isHistoryValid(currentNormal, currentDepth, currentGeometryId, glm::vec3(nd01), nd01.w, dev_gBuffer_geometryIdPrev[idx01]);
+	bool v11 = isHistoryValid(currentNormal, currentDepth, currentGeometryId, glm::vec3(nd11), nd11.w, dev_gBuffer_geometryIdPrev[idx11]);
 
 	// Bilinear blending coefficients
 	float w00 = (1.0f - a.x) * (1.0f - a.y);
@@ -815,6 +826,8 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 		dev_gBuffer_normalDepth = other.dev_gBuffer_normalDepth;
 		dev_gBuffer_motionVectors = other.dev_gBuffer_motionVectors;
 		dev_gBuffer_albedo = other.dev_gBuffer_albedo;
+		dev_gBuffer_geometryId = other.dev_gBuffer_geometryId;
+		dev_gBuffer_geometryIdPrev = other.dev_gBuffer_geometryIdPrev;
 		dev_gBuffer_historyLength = other.dev_gBuffer_historyLength;
 		dev_gBuffer_normalDepthPrev = other.dev_gBuffer_normalDepthPrev;
 		dev_gBuffer_historyLengthPrev = other.dev_gBuffer_historyLengthPrev;
@@ -827,6 +840,8 @@ SVGFManager& SVGFManager::operator=(SVGFManager&& other) noexcept
 		other.dev_gBuffer_normalDepth = nullptr;
 		other.dev_gBuffer_motionVectors = nullptr;
 		other.dev_gBuffer_albedo = nullptr;
+		other.dev_gBuffer_geometryId = nullptr;
+		other.dev_gBuffer_geometryIdPrev = nullptr;
 		other.dev_gBuffer_historyLength = nullptr;
 		other.dev_gBuffer_normalDepthPrev = nullptr;
 		other.dev_gBuffer_historyLengthPrev = nullptr;
@@ -849,6 +864,7 @@ SVGFManager::SVGFManager(SVGFManager&& other) noexcept
 void SVGFManager::swapBuffers()
 {
 	std::swap(dev_gBuffer_normalDepth, dev_gBuffer_normalDepthPrev);
+	std::swap(dev_gBuffer_geometryId, dev_gBuffer_geometryIdPrev);
 	std::swap(dev_gBuffer_historyLength, dev_gBuffer_historyLengthPrev);
 
 	directChannel.swapBuffers();
@@ -896,6 +912,7 @@ void SVGFManager::captureGBuffer(
 		dev_gBuffer_normalDepth,
 		dev_gBuffer_motionVectors,
 		dev_gBuffer_albedo,
+		dev_gBuffer_geometryId,
 		currentViewProj,
 		prevViewProj,
 		m_width,
@@ -953,6 +970,8 @@ void SVGFManager::executeTemporalAccumulation()
 			dev_gBuffer_normalDepth, // Both channels share normal, motion, and history length buffers
 			dev_gBuffer_motionVectors,
 			dev_gBuffer_normalDepthPrev,
+			dev_gBuffer_geometryId,
+			dev_gBuffer_geometryIdPrev,
 			channel->dev_pingBuffer,
 			channel->dev_illuminationPrev,
 			channel->dev_momentsPrev,
@@ -1132,6 +1151,11 @@ void SVGFManager::allocateBuffers()
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_normalDepthPrev, numPixels * sizeof(glm::vec4)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_motionVectors, numPixels * sizeof(glm::vec2)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_albedo, numPixels * sizeof(glm::vec3)));
+	CUDA_CHECK(cudaMalloc(&dev_gBuffer_geometryId, numPixels * sizeof(int)));
+	CUDA_CHECK(cudaMalloc(&dev_gBuffer_geometryIdPrev, numPixels * sizeof(int)));
+
+	// All bytes 0xFF makes every id -1, so the first frame never matches stale history
+	CUDA_CHECK(cudaMemset(dev_gBuffer_geometryIdPrev, 0xFF, numPixels * sizeof(int)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_historyLength, numPixels * sizeof(unsigned int)));
 	CUDA_CHECK(cudaMalloc(&dev_gBuffer_historyLengthPrev, numPixels * sizeof(unsigned int)));
 
@@ -1162,6 +1186,9 @@ void SVGFManager::freeBuffers()
 		cudaFree(dev_gBuffer_albedo);
 	}
 
+	cudaFree(dev_gBuffer_geometryId);
+	cudaFree(dev_gBuffer_geometryIdPrev);
+
 	if (dev_gBuffer_historyLength) {
 		cudaFree(dev_gBuffer_historyLength);
 	}
@@ -1181,6 +1208,8 @@ void SVGFManager::freeBuffers()
 	dev_gBuffer_normalDepthPrev = nullptr;
 	dev_gBuffer_motionVectors = nullptr;
 	dev_gBuffer_albedo = nullptr;
+	dev_gBuffer_geometryId = nullptr;
+	dev_gBuffer_geometryIdPrev = nullptr;
 	dev_gBuffer_historyLength = nullptr;
 	dev_gBuffer_historyLengthPrev = nullptr;
 	dev_outputColor = nullptr;

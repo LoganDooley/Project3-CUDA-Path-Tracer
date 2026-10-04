@@ -63,9 +63,11 @@ public:
 	glm::vec2* dev_gBuffer_motionVectors = nullptr;
 	unsigned int* dev_gBuffer_historyLength = nullptr;
 	glm::vec3* dev_gBuffer_albedo = nullptr; // Albedo of first hit so we can demodulate and modulate after filtering
+	int* dev_gBuffer_geometryId = nullptr; // Object hit by the camera ray, so history is never reused across objects
 
 	// Previous G Buffers
 	glm::vec4* dev_gBuffer_normalDepthPrev = nullptr;
+	int* dev_gBuffer_geometryIdPrev = nullptr;
 	unsigned int* dev_gBuffer_historyLengthPrev = nullptr;
 
 	// Direct and indirect lighting are filtered separately

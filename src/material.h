@@ -51,6 +51,17 @@ struct Material
         return false;
 	}
 
+    // For non-diffuse materials, weight some specular color for the albedo as well
+    __device__ glm::vec3 getDemodulationAlbedo() const {
+        if (type == MaterialType::OpaqueDiffuse) {
+            return albedo;
+        }
+
+        float diffuseProbability = getDiffuseSampleProbability();
+        glm::vec3 specularAlbedo = getSpecularScattering().f0;
+        return diffuseProbability * albedo + (1.0f - diffuseProbability) * specularAlbedo;
+    }
+
     __device__ float getDiffuseSampleProbability() const {
         if (type == MaterialType::PbrMetallicRoughness) {
 			// 50/50 split between diffuse and specular, but if metal or transmissive then no diffuse sampling
