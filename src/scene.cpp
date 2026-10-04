@@ -4,6 +4,7 @@
 #include "material.h"
 #include "pathTraceCommon.h"
 #include "texture.h"
+#include "cudaHelpers.h"
 
 // External Includes
 #include <cuda_runtime.h>
@@ -56,53 +57,32 @@ Scene::Scene(const std::vector<Geom>& geometry,
 	m_textureArrays(textureArrays)
 {
     if (!geometry.empty()) {
-        if (cudaMalloc((void**)&dev_geometry, geometry.size() * sizeof(Geom)) != cudaSuccess) {
-
-            throw std::runtime_error("CUDA Failed to allocate dev_geometry");
-        }
-        if (cudaMemcpy(dev_geometry, geometry.data(), geometry.size() * sizeof(Geom), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy geometry to dev_geometry");
-        }
+        CUDA_CHECK(cudaMalloc((void**)&dev_geometry, geometry.size() * sizeof(Geom)));
+        CUDA_CHECK(cudaMemcpy(dev_geometry, geometry.data(), geometry.size() * sizeof(Geom), cudaMemcpyHostToDevice));
     }
 
     // Allocate materials
     if (!materials.empty()) {
-        if (cudaMalloc((void**)&dev_materials, materials.size() * sizeof(Material)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_materials");
-        }
-        if (cudaMemcpy(dev_materials, materials.data(), materials.size() * sizeof(Material), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy materials to dev_materials");
-        }
+        CUDA_CHECK(cudaMalloc((void**)&dev_materials, materials.size() * sizeof(Material)));
+        CUDA_CHECK(cudaMemcpy(dev_materials, materials.data(), materials.size() * sizeof(Material), cudaMemcpyHostToDevice));
     }
 
     // Allocate triangles
     if (!triangles.empty()) {
-        if (cudaMalloc((void**)&dev_triangles, triangles.size() * sizeof(Triangle)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_triangles");
-        }
-        if (cudaMemcpy(dev_triangles, triangles.data(), triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy triangles to dev_triangles");
-        }
+        CUDA_CHECK(cudaMalloc((void**)&dev_triangles, triangles.size() * sizeof(Triangle)));
+        CUDA_CHECK(cudaMemcpy(dev_triangles, triangles.data(), triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
     }
 
     // Allocate BLAS nodes
     if (!blasNodes.empty()) {
-        if (cudaMalloc((void**)&dev_blasNodes, blasNodes.size() * sizeof(BLASNode)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_blasNodes");
-        }
-        if (cudaMemcpy(dev_blasNodes, blasNodes.data(), blasNodes.size() * sizeof(BLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy BLAS nodes to dev_blasNodes");
-        }
+        CUDA_CHECK(cudaMalloc((void**)&dev_blasNodes, blasNodes.size() * sizeof(BLASNode)));
+        CUDA_CHECK(cudaMemcpy(dev_blasNodes, blasNodes.data(), blasNodes.size() * sizeof(BLASNode), cudaMemcpyHostToDevice));
     }
 
     // Allocate TLAS nodes
     if (!tlasNodes.empty()) {
-        if (cudaMalloc((void**)&dev_tlasNodes, tlasNodes.size() * sizeof(TLASNode)) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to allocate dev_tlasNodes");
-        }
-        if (cudaMemcpy(dev_tlasNodes, tlasNodes.data(), tlasNodes.size() * sizeof(TLASNode), cudaMemcpyHostToDevice) != cudaSuccess) {
-            throw std::runtime_error("CUDA Failed to memcopy TLAS nodes to dev_tlasNodes");
-        }
+        CUDA_CHECK(cudaMalloc((void**)&dev_tlasNodes, tlasNodes.size() * sizeof(TLASNode)));
+        CUDA_CHECK(cudaMemcpy(dev_tlasNodes, tlasNodes.data(), tlasNodes.size() * sizeof(TLASNode), cudaMemcpyHostToDevice));
     }
 }
 

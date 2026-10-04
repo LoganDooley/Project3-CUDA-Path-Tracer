@@ -1,6 +1,7 @@
 #include "renderer.h"
 
 #include "intersection.h"
+#include "cudaHelpers.h"
 #include "tonemapping.h"
 
 #include "stb_image_write.h"
@@ -33,9 +34,7 @@ void Renderer::resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
     extMemDesc.handle.win32.handle = sharedMemoryHandle;
     extMemDesc.size = allocationSize;
 
-    if (cudaImportExternalMemory(&m_cudaExtMemory, &extMemDesc) != cudaSuccess) {
-        throw std::runtime_error("CUDA Failed to import external Vulkan memory handle!");
-    }
+    CUDA_CHECK(cudaImportExternalMemory(&m_cudaExtMemory, &extMemDesc));
 
     cudaExternalMemoryMipmappedArrayDesc mipDesc{};
     mipDesc.offset = 0;
@@ -49,37 +48,23 @@ void Renderer::resize(vk::raii::Device& device, HANDLE sharedMemoryHandle,
     mipDesc.extent.depth = 0;
     mipDesc.numLevels = 1;
 
-    if (cudaExternalMemoryGetMappedMipmappedArray(&m_cudaMipmappedArray, m_cudaExtMemory, &mipDesc) != cudaSuccess) {
-        throw std::runtime_error("CUDA Failed to map external mipmapped array!");
-    }
+    CUDA_CHECK(cudaExternalMemoryGetMappedMipmappedArray(&m_cudaMipmappedArray, m_cudaExtMemory, &mipDesc));
 
-    if (cudaGetMipmappedArrayLevel(&m_cudaArray, m_cudaMipmappedArray, 0) != cudaSuccess) {
-		throw std::runtime_error("CUDA Failed to get mipmapped array level");
-	}
+    CUDA_CHECK(cudaGetMipmappedArrayLevel(&m_cudaArray, m_cudaMipmappedArray, 0));
 
     cudaResourceDesc resDesc{};
     resDesc.resType = cudaResourceTypeArray;
     resDesc.res.array.array = m_cudaArray;
 
-    if (cudaCreateSurfaceObject(&m_cudaSurfaceObject, &resDesc) != cudaSuccess) {
-        throw std::runtime_error("CUDA Failed to create writable surface object pointer!");
-    }
+    CUDA_CHECK(cudaCreateSurfaceObject(&m_cudaSurfaceObject, &resDesc));
 
-    if (cudaMalloc((void**)&dev_pathStates, getPixelCount() * sizeof(PathState)) != cudaSuccess) {
-        throw std::runtime_error("CUDA Failed to allocate dev_pathStates");
-    }
+    CUDA_CHECK(cudaMalloc((void**)&dev_pathStates, getPixelCount() * sizeof(PathState)));
 
-    if (cudaMalloc((void**)&dev_intersectionData, getPixelCount() * sizeof(IntersectionData)) != cudaSuccess) {
-        throw std::runtime_error("CUDA Failed to allocate dev_intersectionData");
-    }
+    CUDA_CHECK(cudaMalloc((void**)&dev_intersectionData, getPixelCount() * sizeof(IntersectionData)));
 
-    if (cudaMalloc((void**)&dev_sampleCounts, getPixelCount() * sizeof(unsigned int)) != cudaSuccess) {
-        throw std::runtime_error("CUDA Failed to allocate dev_sampleCounts");
-    }
+    CUDA_CHECK(cudaMalloc((void**)&dev_sampleCounts, getPixelCount() * sizeof(unsigned int)));
 
-    if (cudaMalloc((void**)&dev_accumulatedColor, getPixelCount() * sizeof(glm::vec3)) != cudaSuccess) {
-        throw std::runtime_error("CUDA Failed to allocate dev_accumulatedColor");
-    }
+    CUDA_CHECK(cudaMalloc((void**)&dev_accumulatedColor, getPixelCount() * sizeof(glm::vec3)));
 
     cudaMemset(dev_sampleCounts, 0, getPixelCount() * sizeof(unsigned int));
 
@@ -202,9 +187,7 @@ void Renderer::saveCurrentRenderToFile(const std::string& filepath)
 
     if (m_renderSettings.bSVGFEnabled) {
         std::vector<glm::vec4> cpuFilteredColor(numPixels);
-        if (cudaMemcpy(cpuFilteredColor.data(), m_svgfManager.dev_outputColor, numPixels * sizeof(glm::vec4), cudaMemcpyDeviceToHost) != cudaSuccess) {
-            throw std::runtime_error("CUDA failed to copy SVGF output to the cpu");
-        }
+        CUDA_CHECK(cudaMemcpy(cpuFilteredColor.data(), m_svgfManager.dev_outputColor, numPixels * sizeof(glm::vec4), cudaMemcpyDeviceToHost));
 
         for (int i = 0; i < numPixels; i++) {
             hdrColors[i] = glm::vec3(cpuFilteredColor[i]);
@@ -214,13 +197,9 @@ void Renderer::saveCurrentRenderToFile(const std::string& filepath)
         std::vector<glm::vec3> cpuAccumulatedColor(numPixels);
         std::vector<unsigned int> cpuSampleCounts(numPixels);
 
-        if (cudaMemcpy(cpuAccumulatedColor.data(), dev_accumulatedColor, numPixels * sizeof(glm::vec3), cudaMemcpyDeviceToHost) != cudaSuccess) {
-            throw std::runtime_error("CUDA failed to copy dev_accumulatedColor to the cpu");
-        }
+        CUDA_CHECK(cudaMemcpy(cpuAccumulatedColor.data(), dev_accumulatedColor, numPixels * sizeof(glm::vec3), cudaMemcpyDeviceToHost));
 
-        if (cudaMemcpy(cpuSampleCounts.data(), dev_sampleCounts, numPixels * sizeof(unsigned int), cudaMemcpyDeviceToHost) != cudaSuccess) {
-            throw std::runtime_error("CUDA failed to copy dev_sampleCounts to the cpu");
-        }
+        CUDA_CHECK(cudaMemcpy(cpuSampleCounts.data(), dev_sampleCounts, numPixels * sizeof(unsigned int), cudaMemcpyDeviceToHost));
 
         for (int i = 0; i < numPixels; i++) {
             unsigned int samples = cpuSampleCounts[i];

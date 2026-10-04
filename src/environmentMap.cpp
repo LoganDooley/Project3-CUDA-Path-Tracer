@@ -1,17 +1,14 @@
 #include "environmentMap.h"
 
-#include <stdexcept>
+#include "cudaHelpers.h"
 
 EnvironmentMap::EnvironmentMap(float* imageData, size_t width, size_t height)
 {
     cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float4>();
-    if (cudaMallocArray(&m_environmentMapArray, &channelDesc, width, height) != cudaSuccess) {
-        throw std::runtime_error("CUDA: Failed to malloc m_environmentMapArray");
-        return;
-    }
+    CUDA_CHECK(cudaMallocArray(&m_environmentMapArray, &channelDesc, width, height));
 
     size_t pitch = width * sizeof(float) * 4;
-    cudaError_t memcpyResult = cudaMemcpy2DToArray(
+    CUDA_CHECK(cudaMemcpy2DToArray(
         m_environmentMapArray,
         0, 0,
         imageData,
@@ -19,11 +16,7 @@ EnvironmentMap::EnvironmentMap(float* imageData, size_t width, size_t height)
         pitch,
         height,
         cudaMemcpyHostToDevice
-    );
-    if (memcpyResult != cudaSuccess) {
-        throw std::runtime_error("CUDA: Failed to copy image data to m_environmentMapArray");
-        return;
-    }
+    ));
 
     cudaResourceDesc resDesc = {};
     resDesc.resType = cudaResourceTypeArray;

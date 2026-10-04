@@ -11,15 +11,6 @@
 #include "imgui.h"
 
 #include <initializer_list>
-#include <iostream>
-
-#define CUDA_CHECK(ans) { cudaAssert((ans), __FILE__, __LINE__); }
-inline void cudaAssert(cudaError_t code, const char* file, int line, bool abort = true) {
-	if (code != cudaSuccess) {
-		std::cerr << "CUDA Error: " << cudaGetErrorString(code) << " " << file << " -> Line: " << line << std::endl;
-		if (abort) exit(code);
-	}
-}
 
 __device__ glm::vec2 calculateMotionVector(
 	glm::vec3 worldPos,
