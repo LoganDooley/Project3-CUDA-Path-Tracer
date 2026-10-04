@@ -111,7 +111,8 @@ struct MicrofacetScattering {
 		float alpha; // For GGX
 	};
 
-	glm::vec3 f0;
+	glm::vec3 f0; // Base reflectivity at normal incidence
+	glm::vec3 transmissionTint = glm::vec3(1.0f); // Tints refracted light
 	float ior;
 
 	bool bAllowTransmission = false;
@@ -198,7 +199,7 @@ struct MicrofacetScattering {
 			float transmissionValue = ((dotOH * dotIH) * D * G * (1.0f - F)) /
 				(cosThetaI * absCosThetaO * sqrtDenom * sqrtDenom);
 
-			return f0 * transmissionValue;
+			return transmissionTint * transmissionValue;
 		}
 	}
 

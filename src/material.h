@@ -110,7 +110,14 @@ struct Material
 			// Clamp roughness to a minimum value so we don't get a delta distribution
             float roughness = glm::max(pbr.roughness, 0.05f);
             scattering.alpha = roughness * roughness;
-            scattering.f0 = albedo;
+
+            // Dielectrics reflect a color set by their IOR, metals reflect their base color
+            float r0 = (ior - 1.0f) / (ior + 1.0f);
+            r0 = r0 * r0;
+            scattering.f0 = glm::mix(glm::vec3(r0), albedo, pbr.metallic);
+
+            // Refracted light is tinted by the base color
+            scattering.transmissionTint = albedo;
             scattering.bAllowTransmission = pbr.transmission > 0.0f;
 		}
 

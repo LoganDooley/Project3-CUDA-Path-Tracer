@@ -641,6 +641,8 @@ void parseGltfMaterials(const tg3_model& model, const std::string& baseDir, std:
         mat.type = MaterialType::PbrMetallicRoughness;
         mat.albedoTexture = 0;
 		mat.pbr.metallicRoughnessTexture = 0;
+        mat.pbr.transmission = 0.0f;
+        mat.ior = 1.5f;
 
         float emissiveSum = gltfMat.emissive_factor[0] + gltfMat.emissive_factor[1] + gltfMat.emissive_factor[2];
         if (emissiveSum > 0.0f) {
