@@ -84,7 +84,7 @@ __device__ bool DevScene::isVisible(const Ray& ray, float tMax)
     return result.t < 0.0f || result.t > tMax;
 }
 
-__device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random, 
+__device__ glm::vec3 DevScene::nextEventEstimation(const glm::vec4& random, 
     const Ray& incomingRay, 
     const IntersectionData& intersectionData,
 	glm::vec3& outDirectionToLight,
@@ -139,14 +139,11 @@ __device__ glm::vec3 DevScene::nextEventEsimation(const glm::vec4& random,
         return glm::vec3(0.0f);
 	}
 
-    Ray visibilityRay;
-    const float epsilon = 0.0001f;
+    // Create visibility ray
+    Ray visibilityRay = Ray::generateBouncedRay(intersectionData.normal, hitPoint, L);
 
-	glm::vec3 offsetDirection = (cosThetaSurface > 0.0f) ? intersectionData.normal : -intersectionData.normal;
-    visibilityRay.origin = hitPoint + epsilon * offsetDirection;
-    visibilityRay.direction = L;
-
-    if (!isVisible(visibilityRay, distance - (2.0f * epsilon))) {
+    // Need to subtract by 2 * epsilon since we shift the ray origin by epsilon in the opposite direction
+    if (!isVisible(visibilityRay, distance - (2.0f * RAY_OFFSET_EPSILON))) {
         return glm::vec3(0.0f);
     }
 

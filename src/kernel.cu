@@ -286,7 +286,7 @@ __global__ void kernShade(
 		glm::vec3 directionToLight = glm::vec3(0.0f);
         float lightPdf = 0.0f;
 
-        glm::vec3 lightSample = dev_scene.nextEventEsimation(neeRandom, pathState.ray, intersectionData, directionToLight, lightPdf);
+        glm::vec3 lightSample = dev_scene.nextEventEstimation(neeRandom, pathState.ray, intersectionData, directionToLight, lightPdf);
 
         if (lightPdf > 0.0f && glm::length(lightSample) > 0.0f) {
 			// Find the pdf if this direction was sampled from the BRDF

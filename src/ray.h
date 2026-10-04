@@ -4,6 +4,9 @@
 
 #include <cuda_runtime.h>
 
+// Distance new rays are pushed off a surface so they don't immediately re-hit it
+constexpr float RAY_OFFSET_EPSILON = 0.0001f;
+
 struct Ray {
 public:
 	__host__ __device__ glm::vec3 getPositionAtTime(const float& t) const {
@@ -20,7 +23,7 @@ public:
 	// Construct new ray with origin shifted in direction of the normal as needed
 	__host__ __device__ static Ray generateBouncedRay(const glm::vec3& normal, const glm::vec3& newOrigin, const glm::vec3& newDirection) {
 
-		const float epsilon = copysignf(0.0001f, glm::dot(normal, newDirection));
+		const float epsilon = copysignf(RAY_OFFSET_EPSILON, glm::dot(normal, newDirection));
 		Ray newRay;
 		newRay.origin = newOrigin + epsilon * normal;
 		newRay.direction = newDirection;
