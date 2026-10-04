@@ -246,18 +246,72 @@ static glm::mat4 getUpAxisTransform(UpAxis upAxis)
     }
 }
 
-std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath, UpAxis upAxis)
+Material FallbackMaterialSettings::toMaterial() const
+{
+    Material mat{};
+    mat.albedo = albedo;
+    mat.albedoTexture = 0;
+    mat.emittance = 0.0f;
+    mat.ior = ior;
+
+    switch (type) {
+    case Type::Mirror:
+        mat.type = MaterialType::PerfectSpecular;
+        mat.blinnPhong.bRefractive = false;
+        break;
+    case Type::Glass:
+        mat.type = MaterialType::PerfectSpecular;
+        mat.blinnPhong.bRefractive = true;
+        break;
+    case Type::Glossy:
+        // Same roughness to exponent mapping as json specular materials
+        mat.type = MaterialType::BlinnPhong;
+        mat.blinnPhong.specularColor = glm::vec3(1.0f);
+        mat.blinnPhong.exponent = glm::mix(1.0f, 1000.0f, 1.0f - roughness);
+        mat.blinnPhong.bRefractive = false;
+        break;
+    case Type::Pbr:
+        mat.type = MaterialType::PbrMetallicRoughness;
+        mat.pbr.metallic = metallic;
+        mat.pbr.roughness = roughness;
+        mat.pbr.transmission = 0.0f;
+        mat.pbr.metallicRoughnessTexture = 0;
+        break;
+    default:
+        mat.type = MaterialType::OpaqueDiffuse;
+        break;
+    }
+
+    return mat;
+}
+
+static void applyFallbackMaterial(std::vector<Material>& materials, std::vector<Geom>& geometry, const SceneLoadOptions& options)
+{
+    int fallbackIndex = static_cast<int>(materials.size());
+    materials.push_back(options.fallbackMaterial.toMaterial());
+
+    for (Geom& geom : geometry) {
+        bool bHasValidMaterial = geom.materialid >= 0 && geom.materialid < fallbackIndex;
+        bool bIsLight = bHasValidMaterial && materials[geom.materialid].emittance > 0.0f;
+
+        if (!bHasValidMaterial || (options.bOverrideMaterials && !bIsLight)) {
+            geom.materialid = fallbackIndex;
+        }
+    }
+}
+
+std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath, const SceneLoadOptions& options)
 {
     std::string ext = getLowercaseExtension(filepath);
 
     if(ext == ".json") {
-        return loadFromJson(filepath, upAxis);
+        return loadFromJson(filepath, options);
     }
     else if(ext == ".gltf" || ext == ".glb") {
-        return loadFromGltf(filepath, upAxis);
+        return loadFromGltf(filepath, options);
     }
     else if(ext == ".obj") {
-        return loadFromObj(filepath, upAxis);
+        return loadFromObj(filepath, options);
 	}
     else {
 		std::cerr << "Unsupported scene file format: " << ext << std::endl;
@@ -265,7 +319,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromFile(const std::string& filepath, Up
 	}
 }
 
-std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath, UpAxis upAxis)
+std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath, const SceneLoadOptions& options)
 {
     std::ifstream file(filepath);
     if (!file.is_open()) {
@@ -325,13 +379,8 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath, Up
             materialMap[name] = static_cast<int>(materials.size()) - 1;
         }
     }
-    if (materials.empty()) {
-        // Add a fallback diffuse pink material
-        materials.push_back(Material{});
-    }
-
     // Parse geometry
-    glm::mat4 upAxisTransform = getUpAxisTransform(upAxis);
+    glm::mat4 upAxisTransform = getUpAxisTransform(options.upAxis);
 
     if (sceneJson.contains("Objects")) {
         for (const auto& objData : sceneJson["Objects"]) {
@@ -342,7 +391,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath, Up
 
             std::string matName = objData.value("MATERIAL", "");
             auto it = materialMap.find(matName);
-            geom.materialid = (it != materialMap.end()) ? it->second : 0;
+            geom.materialid = (it != materialMap.end()) ? it->second : -1; // -1 gets the fallback material
 
             // Extract temporary transform components
             glm::vec3 translation = parseVec3(objData["TRANS"]);
@@ -365,6 +414,8 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath, Up
             geometry.push_back(geom);
         }
     }
+
+    applyFallbackMaterial(materials, geometry, options);
 
     // Sort geometry so lights are first BEFORE building TLAS
     auto it = std::partition(geometry.begin(), geometry.end(), [materials](const Geom& geom) {
@@ -537,7 +588,7 @@ void parseGltfNodeRecursive(
             geom.type = GeomType::MESH;
 
             // Grab material index (fallback to material 0)
-            geom.materialid = (prim.material >= 0 && prim.material < model.materials_count) ? static_cast<int>(prim.material) : 0;
+            geom.materialid = (prim.material >= 0 && prim.material < model.materials_count) ? static_cast<int>(prim.material) : -1; // -1 gets the fallback material
 
             geom.transform = globalTransform;
             geom.inverseTransform = glm::inverse(geom.transform);
@@ -645,13 +696,9 @@ void parseGltfMaterials(const tg3_model& model, const std::string& baseDir, std:
         outMaterials.push_back(mat);
     }
 
-    if (outMaterials.empty()) {
-        // Add a fallback material if none are present
-        outMaterials.push_back(Material{});
-	}
 }
 
-std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath, UpAxis upAxis)
+std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath, const SceneLoadOptions& options)
 {
     std::unique_ptr<Scene> scene = std::make_unique<Scene>();
 
@@ -690,7 +737,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath, Up
     // Parse geometry from default scene
 
     constexpr float kImportScale = 1.0f;
-    glm::mat4 rootTransform = getUpAxisTransform(upAxis) * glm::scale(glm::mat4(1.0f), glm::vec3(kImportScale));
+    glm::mat4 rootTransform = getUpAxisTransform(options.upAxis) * glm::scale(glm::mat4(1.0f), glm::vec3(kImportScale));
 
 	uint32_t activeSceneIdx = (model.default_scene >= 0 && model.default_scene < model.scenes_count) ? model.default_scene : 0;
     if(activeSceneIdx < model.scenes_count) {
@@ -740,6 +787,8 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath, Up
 		blasNodes.insert(blasNodes.end(), geomBlasNodes.begin(), geomBlasNodes.end());
     }
 
+    applyFallbackMaterial(materials, geometry, options);
+
     // Sort geometry so lights are first BEFORE building TLAS
     auto it = std::partition(geometry.begin(), geometry.end(), [materials](const Geom& geom) {
         return geom.materialid < materials.size() && geom.materialid >= 0 && materials[geom.materialid].emittance > 0.0f;
@@ -763,7 +812,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath, Up
     return std::make_unique<Scene>(geometry, lightCount, sortedTriangles, blasNodes, tlasNodes, materials, textures, textureArrays);
 }
 
-std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, UpAxis upAxis)
+std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, const SceneLoadOptions& options)
 {
 	tinyobj::ObjReaderConfig readerConfig;
 
@@ -880,17 +929,6 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, UpA
         materials.push_back(mat);
     }
 
-    if (materials.empty()) {
-		Material diffuse = Material{};
-        Material glass = Material{};
-		glass.type = MaterialType::PerfectSpecular;
-		glass.albedo = glm::vec3(1.0f);
-		glass.ior = 1.5f;
-		glass.blinnPhong.bRefractive = true;
-		glass.albedoTexture = 0;
-        materials.push_back(glass);
-    }
-
     // Parse meshes
     for (const auto& shape : shapes) {
         Geom geom{};
@@ -955,14 +993,14 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, UpA
             triangles.push_back(tri);
 
 			int objMaterialId = shape.mesh.material_ids[f];
-			geom.materialid = (objMaterialId >= 0 && objMaterialId < materials.size()) ? objMaterialId : 0;
+			geom.materialid = (objMaterialId >= 0 && objMaterialId < materials.size()) ? objMaterialId : -1; // -1 gets the fallback material
 
 			indexOffset += fv;
         }
 
 		geom.triangleCount = triangles.size() - geom.triangleOffset;
 
-		geom.transform = getUpAxisTransform(upAxis);
+		geom.transform = getUpAxisTransform(options.upAxis);
 		geom.inverseTransform = glm::inverse(geom.transform);
 		geom.invTranspose = glm::inverseTranspose(geom.transform);
 
@@ -1003,6 +1041,8 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, UpA
         geom.blasNodeOffset = nodeOffsetStart;
 		blasNodes.insert(blasNodes.end(), geomBlasNodes.begin(), geomBlasNodes.end());
     }
+
+    applyFallbackMaterial(materials, geometry, options);
 
     // Sort geometry so lights are first BEFORE building TLAS
     auto it = std::partition(geometry.begin(), geometry.end(), [materials](const Geom& geom) {

@@ -41,6 +41,8 @@ private:
 
 	void drawLoadSceneModal();
 
+	void drawFallbackMaterialImGui();
+
 	void saveCurrentRender();
 
 	void pickEnvironmentMap();
@@ -58,7 +60,7 @@ private:
 	// Load scene modal state
 	std::string m_pendingScenePath;
 	bool m_bOpenLoadSceneModal = false;
-	UpAxis m_selectedUpAxis = UpAxis::YUp;
+	SceneLoadOptions m_sceneLoadOptions;
 
 	std::unique_ptr<EnvironmentMap> m_currentEnvironmentMap = nullptr;
 

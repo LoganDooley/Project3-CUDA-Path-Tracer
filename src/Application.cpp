@@ -796,7 +796,7 @@ void Application::drawLoadSceneModal()
 
 		int selectedOption = 0;
 		for (int i = 0; i < 3; i++) {
-			if (upAxisOptions[i] == m_selectedUpAxis) {
+			if (upAxisOptions[i] == m_sceneLoadOptions.upAxis) {
 				selectedOption = i;
 			}
 		}
@@ -805,7 +805,7 @@ void Application::drawLoadSceneModal()
 			for (int i = 0; i < 3; i++) {
 				bool bSelected = (i == selectedOption);
 				if (ImGui::Selectable(upAxisLabels[i], bSelected)) {
-					m_selectedUpAxis = upAxisOptions[i];
+					m_sceneLoadOptions.upAxis = upAxisOptions[i];
 				}
 				if (bSelected) {
 					ImGui::SetItemDefaultFocus();
@@ -814,9 +814,11 @@ void Application::drawLoadSceneModal()
 			ImGui::EndCombo();
 		}
 
+		drawFallbackMaterialImGui();
+
 		ImGui::BeginDisabled(!bHasScene);
 		if (ImGui::Button("Load")) {
-			m_currentScene = SceneLoader::loadFromFile(m_pendingScenePath, m_selectedUpAxis);
+			m_currentScene = SceneLoader::loadFromFile(m_pendingScenePath, m_sceneLoadOptions);
 			m_camera.m_hasChanged = true;
 			ImGui::CloseCurrentPopup();
 		}
@@ -828,6 +830,37 @@ void Application::drawLoadSceneModal()
 
 		ImGui::EndPopup();
 	}
+}
+
+
+void Application::drawFallbackMaterialImGui()
+{
+	FallbackMaterialSettings& fallback = m_sceneLoadOptions.fallbackMaterial;
+	using Type = FallbackMaterialSettings::Type;
+
+	ImGui::SeparatorText("Fallback Material");
+	ImGui::TextDisabled("Used for objects without a material");
+
+	const char* typeLabels[] = { "Diffuse", "Mirror", "Glass", "Glossy", "PBR" };
+	int type = static_cast<int>(fallback.type);
+	if (ImGui::Combo("Type", &type, typeLabels, IM_ARRAYSIZE(typeLabels))) {
+		fallback.type = static_cast<Type>(type);
+	}
+
+	ImGui::ColorEdit3("Albedo", &fallback.albedo.x);
+
+	// Only show the settings the selected type uses
+	if (fallback.type == Type::Glossy || fallback.type == Type::Pbr) {
+		ImGui::SliderFloat("Roughness", &fallback.roughness, 0.0f, 1.0f);
+	}
+	if (fallback.type == Type::Pbr) {
+		ImGui::SliderFloat("Metallic", &fallback.metallic, 0.0f, 1.0f);
+	}
+	if (fallback.type == Type::Glass) {
+		ImGui::SliderFloat("IOR", &fallback.ior, 1.0f, 2.5f);
+	}
+
+	ImGui::Checkbox("Override All Materials (Keep Lights)", &m_sceneLoadOptions.bOverrideMaterials);
 }
 
 void Application::saveCurrentRender()
