@@ -16,6 +16,7 @@
 #include "material.h"
 #include "intersection.h"
 #include "tonemapping.h"
+#include "displayHelpers.h"
 
 #define MIN_RUSSIAN_ROULETTE_BOUNCES 2
 
@@ -41,15 +42,6 @@ thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int de
 __device__ void get2DIndex(int index1D, int width, int* outX, int* outY) {
     *outX = index1D % width;
     *outY = index1D / width;
-}
-
-__device__ uchar4 convertColorToUChar4(const glm::vec3& color) {
-    uchar4 pixelColor;
-    pixelColor.x = (unsigned char)(color.z * 255.0f); // Blue
-    pixelColor.y = (unsigned char)(color.y * 255.0f); // Green
-    pixelColor.z = (unsigned char)(color.x * 255.0f); // Red
-    pixelColor.w = 255; // Alpha
-    return pixelColor;
 }
 
 __device__ void addRadiance(PathState& pathState, const glm::vec3& radiance, bool bDirect) {
@@ -86,13 +78,11 @@ __device__ void writePathStateToSurface(const PathState& pathState,
 
 	glm::vec3 finalColor = Tonemapping::toDisplayColor(averageColor);
 
-	uchar4 pixelColor = convertColorToUChar4(finalColor);
-
     int pixelIndexX = 0;
     int pixelIndexY = 0;
     get2DIndex(pixelIndex, width, &pixelIndexX, &pixelIndexY);
 
-    surf2Dwrite(pixelColor, surface, pixelIndexX * sizeof(uchar4), pixelIndexY);
+    writeSurfacePixel(surface, pixelIndexX, pixelIndexY, finalColor);
 }
 
 __device__ glm::vec3 sampleEnvironmentMap(cudaTextureObject_t environmentMap, const glm::vec3& direction) {
@@ -380,17 +370,8 @@ __global__ void kernDebugUV(cudaSurfaceObject_t surface,
 	}
 	IntersectionData intersection = intersectionData[pixelIndex];
 
-    float r = intersection.uv.x;
-    float g = intersection.uv.y;
-    float b = 0.0f;
-
-    uchar4 pixelColor;
-    pixelColor.x = (unsigned char)(b * 255.0f); // Blue
-    pixelColor.y = (unsigned char)(g * 255.0f); // Green
-    pixelColor.z = (unsigned char)(r * 255.0f); // Red
-    pixelColor.w = 255;
-
-    surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
+    // UVs as red and green
+    writeSurfacePixel(surface, x, y, glm::vec3(intersection.uv, 0.0f));
 }
 
 __device__ glm::vec3 heatmapColor(float t) {
@@ -445,7 +426,7 @@ __global__ void kernDebugBvhHeatmap(cudaSurfaceObject_t surface,
     int pixelY = 0;
     get2DIndex(dev_pathStates[index].pixelIndex, width, &pixelX, &pixelY);
 
-    surf2Dwrite(convertColorToUChar4(color), surface, pixelX * sizeof(uchar4), pixelY);
+    writeSurfacePixel(surface, pixelX, pixelY, color);
 }
 
 __global__ void kernColorSurface(cudaSurfaceObject_t surface,

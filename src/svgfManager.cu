@@ -4,6 +4,7 @@
 #include "intersection.h"
 #include "material.h"
 #include "tonemapping.h"
+#include "displayHelpers.h"
 
 #include <cuda_runtime.h>
 
@@ -601,18 +602,9 @@ __global__ void kernAtrousFilter(
 	}
 }
 
+// Remap a vector from [-1, 1] to [0, 1] so it can be visualized
 __device__ void drawVec3ToSurface(const glm::vec3& vector, cudaSurfaceObject_t surface, int x, int y) {
-	float r = vector.x * 0.5f + 0.5f;
-	float g = vector.y * 0.5f + 0.5f;
-	float b = vector.z * 0.5f + 0.5f;
-
-	uchar4 pixelColor;
-	pixelColor.x = (unsigned char)(b * 255.0f); // Blue
-	pixelColor.y = (unsigned char)(g * 255.0f); // Green
-	pixelColor.z = (unsigned char)(r * 255.0f); // Red
-	pixelColor.w = 255;
-
-	surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
+	writeSurfacePixel(surface, x, y, vector * 0.5f + 0.5f);
 }
 
 __global__ void kernDebugNormals(glm::vec4* dev_gBuffer_normalDepth, cudaSurfaceObject_t surface, int width, int height)
@@ -663,13 +655,7 @@ __global__ void kernDebugSVGFIllumination(
 	// Tonemap for display purposes
 	glm::vec3 finalColor = Tonemapping::toDisplayColor(hdrColor);
 
-	uchar4 pixelColor;
-	pixelColor.x = (unsigned char)(finalColor.z * 255.0f); // Blue
-	pixelColor.y = (unsigned char)(finalColor.y * 255.0f); // Green
-	pixelColor.z = (unsigned char)(finalColor.x * 255.0f); // Red
-	pixelColor.w = 255;
-
-	surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
+	writeSurfacePixel(surface, x, y, finalColor);
 }
 
 __global__ void kernDebugVariance(
@@ -686,15 +672,9 @@ __global__ void kernDebugVariance(
 	float variance = dev_variance[pixelIndex];
 
 	// Amplify variance visually since raw statistical variance values are tiny decimal numbers
-	float visualIntensity = glm::clamp(variance * 10.0f, 0.0f, 1.0f);
+	float visualIntensity = variance * 10.0f;
 
-	uchar4 pixelColor;
-	pixelColor.x = (unsigned char)(visualIntensity * 255.0f); // Blue
-	pixelColor.y = 0;                                         // Green
-	pixelColor.z = (unsigned char)(visualIntensity * 255.0f); // Red (Creates Magenta for noise)
-	pixelColor.w = 255;
-
-	surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
+	writeSurfacePixel(surface, x, y, glm::vec3(visualIntensity, 0.0f, visualIntensity));
 }
 
 __global__ void kernDemodulateAlbedo(
