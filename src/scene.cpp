@@ -246,6 +246,12 @@ static glm::mat4 getUpAxisTransform(UpAxis upAxis)
     }
 }
 
+// Helper to apply both the scale and up axis transform from the import settings to a model
+static glm::mat4 getImportTransform(const SceneLoadOptions& options)
+{
+    return getUpAxisTransform(options.upAxis) * glm::scale(glm::mat4(1.0f), glm::vec3(options.importScale));
+}
+
 Material FallbackMaterialSettings::toMaterial() const
 {
     Material mat{};
@@ -380,7 +386,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath, co
         }
     }
     // Parse geometry
-    glm::mat4 upAxisTransform = getUpAxisTransform(options.upAxis);
+    glm::mat4 importTransform = getImportTransform(options);
 
     if (sceneJson.contains("Objects")) {
         for (const auto& objData : sceneJson["Objects"]) {
@@ -407,7 +413,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromJson(const std::string& filepath, co
             glm::mat4 scaleMat = glm::scale(glm::mat4(1.0f), scale);
 
             // Set matrices
-            geom.transform = upAxisTransform * translationMat * rotationMat * scaleMat;
+            geom.transform = importTransform * translationMat * rotationMat * scaleMat;
             geom.inverseTransform = glm::inverse(geom.transform);
             geom.invTranspose = glm::inverseTranspose(geom.transform);
 
@@ -546,6 +552,7 @@ void parseGltfNodeRecursive(
                         localUVs[v] = glm::vec2(rawUVShorts[0], rawUVShorts[1]) / 65535.0f;
                     }
                     else {
+                        // No conversion needed for float types
                         const float* rawUVFloats = reinterpret_cast<const float*>(rawUV);
                         localUVs[v] = glm::vec2(rawUVFloats[0], rawUVFloats[1]);
                     }
@@ -826,8 +833,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromGltf(const std::string& filepath, co
 
     // Parse geometry from default scene
 
-    constexpr float kImportScale = 1.0f;
-    glm::mat4 rootTransform = getUpAxisTransform(options.upAxis) * glm::scale(glm::mat4(1.0f), glm::vec3(kImportScale));
+    glm::mat4 rootTransform = getImportTransform(options);
 
 	uint32_t activeSceneIdx = (model.default_scene >= 0 && model.default_scene < model.scenes_count) ? model.default_scene : 0;
     if(activeSceneIdx < model.scenes_count) {
@@ -1090,7 +1096,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, con
 
 		geom.triangleCount = triangles.size() - geom.triangleOffset;
 
-		geom.transform = getUpAxisTransform(options.upAxis);
+		geom.transform = getImportTransform(options);
 		geom.inverseTransform = glm::inverse(geom.transform);
 		geom.invTranspose = glm::inverseTranspose(geom.transform);
 

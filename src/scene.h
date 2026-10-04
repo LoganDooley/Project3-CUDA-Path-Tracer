@@ -101,6 +101,9 @@ struct FallbackMaterialSettings {
 struct SceneLoadOptions {
 	UpAxis upAxis = UpAxis::YUp;
 
+	// Some models are really small so this lets us scale them up when importing
+	float importScale = 1.0f;
+
 	FallbackMaterialSettings fallbackMaterial;
 
 	// Replace every non-emissive material with the fallback

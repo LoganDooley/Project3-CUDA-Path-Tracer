@@ -819,6 +819,9 @@ void Application::drawLoadSceneModal()
 			ImGui::EndCombo();
 		}
 
+		ImGui::InputFloat("Import Scale", &m_sceneLoadOptions.importScale, 0.0f, 0.0f, "%g");
+		m_sceneLoadOptions.importScale = glm::max(m_sceneLoadOptions.importScale, 1e-6f);
+
 		drawFallbackMaterialImGui();
 
 		ImGui::BeginDisabled(!bHasScene);
