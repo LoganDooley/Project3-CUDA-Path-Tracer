@@ -503,15 +503,26 @@ void parseGltfNodeRecursive(
 
 			const uint8_t* uvBufferData = nullptr;
 			uint32_t uvStride = 0;
+			int32_t uvComponentType = TG3_COMPONENT_TYPE_FLOAT;
 			bool hasUVs = false;
 
             if (uvAccessorIdx >= 0 && uvAccessorIdx < model.accessors_count) {
                 const tg3_accessor& uvAccessor = model.accessors[uvAccessorIdx];
                 const tg3_buffer_view& uvView = model.buffer_views[uvAccessor.buffer_view];
                 const tg3_buffer& uvBuffer = model.buffers[uvView.buffer];
-                
+
+                // UVs can actually be either floats, unsigned bytes, or unsigned shorts
+                uvComponentType = uvAccessor.component_type;
+                uint32_t uvSize = 4;
+                if (uvComponentType == TG3_COMPONENT_TYPE_UNSIGNED_BYTE) {
+                    uvSize = 1;
+                }
+                else if (uvComponentType == TG3_COMPONENT_TYPE_UNSIGNED_SHORT) {
+                    uvSize = 2;
+                }
+
                 uvBufferData = uvBuffer.data.data + uvView.byte_offset + uvAccessor.byte_offset;
-				uvStride = uvView.byte_stride > 0 ? uvView.byte_stride : sizeof(float) * 2;
+				uvStride = uvView.byte_stride > 0 ? uvView.byte_stride : uvSize * 2;
 				hasUVs = uvAccessor.count == vertexCount;
             }
 
@@ -524,8 +535,20 @@ void parseGltfNodeRecursive(
                 localVertices[v] = glm::vec3(rawVertexFloats[0], rawVertexFloats[1], rawVertexFloats[2]);
 
                 if(hasUVs) {
-                    const float* rawUVFloats = reinterpret_cast<const float*>(uvBufferData + (v * uvStride));
-                    localUVs[v] = glm::vec2(rawUVFloats[0], rawUVFloats[1]);
+                    const uint8_t* rawUV = uvBufferData + (v * uvStride);
+                    if (uvComponentType == TG3_COMPONENT_TYPE_UNSIGNED_BYTE) {
+                        // Convert byte to float by dividing by 255
+                        localUVs[v] = glm::vec2(rawUV[0], rawUV[1]) / 255.0f;
+                    }
+                    else if (uvComponentType == TG3_COMPONENT_TYPE_UNSIGNED_SHORT) {
+						// Convert unsigned short to float by dividing by 65535
+                        const uint16_t* rawUVShorts = reinterpret_cast<const uint16_t*>(rawUV);
+                        localUVs[v] = glm::vec2(rawUVShorts[0], rawUVShorts[1]) / 65535.0f;
+                    }
+                    else {
+                        const float* rawUVFloats = reinterpret_cast<const float*>(rawUV);
+                        localUVs[v] = glm::vec2(rawUVFloats[0], rawUVFloats[1]);
+                    }
 				}
             }
 
@@ -607,6 +630,48 @@ void parseGltfNodeRecursive(
     }
 }
 
+// Helper for matching strings since gltf uses its own string struct
+static bool gltfStringEquals(const tg3_str& str, const char* text)
+{
+    size_t length = strlen(text);
+    return str.data != nullptr && str.len == length && strncmp(str.data, text, length) == 0;
+}
+
+static const tg3_value* findGltfExtension(const tg3_extras_ext& ext, const char* name)
+{
+    for (uint32_t i = 0; i < ext.extensions_count; i++) {
+        if (gltfStringEquals(ext.extensions[i].name, name)) {
+            return &ext.extensions[i].value;
+        }
+    }
+    return nullptr;
+}
+
+// Try reading a double from a gltf object and return a default value if not found
+static double getGltfNumber(const tg3_value* object, const char* key, double defaultValue)
+{
+    if (object == nullptr || object->type != TG3_VALUE_OBJECT) {
+        // Invalid type or no object
+        return defaultValue;
+    }
+
+    // Search through the objects data until we find one that matches the search
+    for (uint32_t i = 0; i < object->object_count; i++) {
+        const tg3_kv_pair& pair = object->object_data[i];
+        if (!gltfStringEquals(pair.key, key)) {
+            continue;
+        }
+
+        if (pair.value.type == TG3_VALUE_REAL) {
+            return pair.value.real_val;
+        }
+        if (pair.value.type == TG3_VALUE_INT) {
+            return static_cast<double>(pair.value.int_val);
+        }
+    }
+    return defaultValue;
+}
+
 void parseGltfMaterials(const tg3_model& model, const std::string& baseDir, std::vector<Material>& outMaterials, std::vector<cudaTextureObject_t>& outTextures, std::vector<cudaArray_t>& outTextureArrays)
 {
     // Load all images as textures first
@@ -615,21 +680,31 @@ void parseGltfMaterials(const tg3_model& model, const std::string& baseDir, std:
 		outTextureArrays.resize(model.images_count, nullptr);
 
         for (uint32_t i = 0; i < model.images_count; i++) {
-            if(model.images[i].uri.data == nullptr) {
-                std::cerr << "Image " << i << " has no URI, skipping." << std::endl;
-                continue;
-			}
-            std::string fullImagePath = baseDir + model.images[i].uri.data;
-            
-            bool success = Texture::LoadTexture(
-                fullImagePath.c_str(),
-                outTextures[i],
-                outTextureArrays[i]
-            );
+            const tg3_image& image = model.images[i];
 
-            if(!success) {
+            if (image.buffer_view >= 0 && image.buffer_view < model.buffer_views_count) {
+                // Image is embedded in the binary so load it in a special way
+                const tg3_buffer_view& view = model.buffer_views[image.buffer_view];
+                const tg3_buffer& buffer = model.buffers[view.buffer];
+
+                if (!Texture::LoadTextureFromMemory(buffer.data.data + view.byte_offset, view.byte_length, outTextures[i], outTextureArrays[i])) {
+                    std::cerr << "Failed to load embedded image " << i << std::endl;
+                }
+                continue;
+            }
+
+            if (image.uri.data == nullptr) {
+                // No uri to look up the texture, so fail
+                std::cerr << "Image " << i << " has no uri or buffer view, skipping." << std::endl;
+                continue;
+            }
+
+            // Load texture from filepath
+            std::string uri(image.uri.data, image.uri.len);
+            std::string fullImagePath = baseDir + uri;
+            if (!Texture::LoadTexture(fullImagePath.c_str(), outTextures[i], outTextureArrays[i])) {
                 std::cerr << "Failed to load texture: " << fullImagePath << std::endl;
-			}
+            }
         }
     }
 
@@ -645,7 +720,13 @@ void parseGltfMaterials(const tg3_model& model, const std::string& baseDir, std:
         mat.ior = 1.5f;
 
         float emissiveSum = gltfMat.emissive_factor[0] + gltfMat.emissive_factor[1] + gltfMat.emissive_factor[2];
-        if (emissiveSum > 0.0f) {
+        bool bHasEmissiveTexture = gltfMat.emissive_texture.index >= 0;
+        if (emissiveSum > 0.0f && bHasEmissiveTexture) {
+            // I don't have support for emissive textures right now. Add an extra log to notify this
+            std::cerr << "Material " << i << " has textured emission, which isn't supported. Loading it without emission." << std::endl;
+        }
+
+        if (emissiveSum > 0.0f && !bHasEmissiveTexture) {
             mat.albedo = glm::vec3(
                 gltfMat.emissive_factor[0],
                 gltfMat.emissive_factor[1],
@@ -664,6 +745,13 @@ void parseGltfMaterials(const tg3_model& model, const std::string& baseDir, std:
         mat.emittance = 0.0f;
 		mat.pbr.roughness = gltfMat.pbr_metallic_roughness.roughness_factor;
 		mat.pbr.metallic = gltfMat.pbr_metallic_roughness.metallic_factor;
+
+        // Loading the transmission extensions since I support transmission in pbr materials
+        const tg3_value* transmissionExtension = findGltfExtension(gltfMat.ext, "KHR_materials_transmission");
+        mat.pbr.transmission = static_cast<float>(getGltfNumber(transmissionExtension, "transmissionFactor", 0.0));
+
+        const tg3_value* iorExtension = findGltfExtension(gltfMat.ext, "KHR_materials_ior");
+        mat.ior = static_cast<float>(getGltfNumber(iorExtension, "ior", 1.5));
 
         if (mat.pbr.roughness > 0.99f && mat.pbr.metallic == 0.0f && mat.pbr.transmission == 0.0f) {
             mat.type = MaterialType::OpaqueDiffuse;
@@ -931,7 +1019,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, con
         materials.push_back(mat);
     }
 
-    // Parse meshes
+    // Flip v coordinate since obj loads images upside down
     for (const auto& shape : shapes) {
         Geom geom{};
         geom.type = GeomType::MESH;
@@ -953,7 +1041,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, con
             if(idx0.texcoord_index >= 0) {
                 tri.uv0 = glm::vec2(
                     attrib.texcoords[2 * size_t(idx0.texcoord_index) + 0],
-                    attrib.texcoords[2 * size_t(idx0.texcoord_index) + 1]
+                    1.0f - attrib.texcoords[2 * size_t(idx0.texcoord_index) + 1]
                 );
 			}
             else {
@@ -969,7 +1057,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, con
             if(idx1.texcoord_index >= 0) {
                 tri.uv1 = glm::vec2(
                     attrib.texcoords[2 * size_t(idx1.texcoord_index) + 0],
-                    attrib.texcoords[2 * size_t(idx1.texcoord_index) + 1]
+                    1.0f - attrib.texcoords[2 * size_t(idx1.texcoord_index) + 1]
                 );
             }
             else {
@@ -985,7 +1073,7 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, con
             if (idx2.texcoord_index >= 0) {
                 tri.uv2 = glm::vec2(
                     attrib.texcoords[2 * size_t(idx2.texcoord_index) + 0],
-                    attrib.texcoords[2 * size_t(idx2.texcoord_index) + 1]
+                    1.0f - attrib.texcoords[2 * size_t(idx2.texcoord_index) + 1]
                 );
             }
             else {

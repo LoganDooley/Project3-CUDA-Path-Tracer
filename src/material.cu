@@ -9,7 +9,6 @@ __device__ void Material::initializeFromIntersection(const IntersectionData& int
 	float u = intersectionData.uv.x;
 	float v = intersectionData.uv.y;
 
-	v = 1.0f - v;
 	if(albedoTexture != 0) {
 		float4 texColor = tex2D<float4>(albedoTexture, u, v);
 

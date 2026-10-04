@@ -12,14 +12,36 @@ public:
 
 		if(!data) {
 			std::cerr << "Failed to load texture: " << filepath << std::endl;
+			return false; 
+		}
+
+		bool success = CreateTextureFromPixels(data, width, height, textureObject, textureArray);
+		stbi_image_free(data);
+		return success;
+	}
+
+	// Binary gltf files have the textures in memory so have to use a special helper here
+	static bool LoadTextureFromMemory(const unsigned char* encodedBytes, size_t byteCount, cudaTextureObject_t& textureObject, cudaArray_t& textureArray) {
+		int width, height, channels;
+		unsigned char* data = stbi_load_from_memory(encodedBytes, static_cast<int>(byteCount), &width, &height, &channels, 4);
+
+		if (!data) {
+			std::cerr << "Failed to decode embedded texture: " << stbi_failure_reason() << std::endl;
 			return false;
 		}
 
+		bool success = CreateTextureFromPixels(data, width, height, textureObject, textureArray);
+		stbi_image_free(data);
+		return success;
+	}
+
+private:
+	// Helper for taking pixel data and uploading it to the gpu
+	static bool CreateTextureFromPixels(const unsigned char* data, int width, int height, cudaTextureObject_t& textureObject, cudaArray_t& textureArray) {
 		cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc(8, 8, 8, 8, cudaChannelFormatKindUnsigned);
 		cudaError_t err = cudaMallocArray(&textureArray, &channelDesc, width, height);
 		if (err != cudaSuccess) {
 			std::cerr << "[CUDA] Failed to allocate array: " << cudaGetErrorString(err) << std::endl;
-			stbi_image_free(data);
 			return false;
 		}
 
@@ -36,11 +58,9 @@ public:
 		if(memcpyResult != cudaSuccess) {
 			std::cerr << "[CUDA] Failed to copy texture data to array: " << cudaGetErrorString(memcpyResult) << std::endl;
 			cudaFreeArray(textureArray);
-			stbi_image_free(data);
+			textureArray = nullptr;
 			return false;
 		}
-
-		stbi_image_free(data);
 
 		cudaResourceDesc resDesc = {};
 		resDesc.resType = cudaResourceTypeArray;
@@ -58,6 +78,7 @@ public:
 		if(err != cudaSuccess) {
 			std::cerr << "[CUDA] Failed to create texture object: " << cudaGetErrorString(err) << std::endl;
 			cudaFreeArray(textureArray);
+			textureArray = nullptr;
 			return false;
 		}
 
