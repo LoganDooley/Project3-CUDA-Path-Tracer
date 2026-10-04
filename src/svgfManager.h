@@ -7,7 +7,9 @@
 
 #include "camera.h"
 #include "svgfSettings.h"
+
 #include <optional>
+#include <memory>
 
 // SVGF needs to compute direct and indirect separately, so create a channel struct
 // to store all the buffers needed for the reconstruction filter

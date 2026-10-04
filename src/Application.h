@@ -3,6 +3,7 @@
 #include "window.h"
 #include "renderer.h"
 #include "scene.h"
+#include "sceneLoader.h"
 #include "camera.h"
 #include "inputState.h"
 #include "environmentMap.h"
