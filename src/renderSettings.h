@@ -19,6 +19,9 @@ struct RenderSettings {
 	int maxBounces = 6;
 	LightSamplingMode lightSamplingMode = LightSamplingMode::Mis;
 
+	// When set to 1 it disables russian roulette
+	float minRussianRouletteSurvival = 0.05f;
+
 	// Stop rendering once every pixel has this many samples, for equal sample comparisons
 	bool bLimitSamples = false;
 	int targetSamplesPerPixel = 1024;

@@ -173,6 +173,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
                 m_renderSettings.bSVGFEnabled ? m_svgfManager.indirectChannel.dev_pingBuffer : nullptr,
                 dev_sampleCounts,
                 m_renderSettings.lightSamplingMode,
+                m_renderSettings.minRussianRouletteSurvival,
                 i,
                 m_frameIndex);
         }
@@ -322,6 +323,10 @@ void Renderer::drawRenderSettingsImGui(Camera& camera)
     if (ImGui::SliderInt("Max Bounces", &m_renderSettings.maxBounces, 1, 32)) {
         camera.m_hasChanged = true;
     }
+    if (ImGui::SliderFloat("Min RR Survival", &m_renderSettings.minRussianRouletteSurvival, 0.01f, 1.0f)) {
+        camera.m_hasChanged = true;
+    }
+    ImGui::SetItemTooltip("Lowest chance a path survives russian roulette. 1 disables russian roulette");
     ImGui::Checkbox("Use Stream Compaction:", &m_renderSettings.bStreamCompactionEnabled);
 	ImGui::Checkbox("Sort Paths by Material:", &m_renderSettings.bSortPathsByMaterial);
 

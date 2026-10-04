@@ -191,6 +191,7 @@ __global__ void kernShade(
     glm::vec4* dev_currentIndirectColor,
     unsigned int* dev_sampleCounts,
     LightSamplingMode lightSamplingMode,
+    float minRussianRouletteSurvival,
     int iteration,
     int frameIndex)
 {
@@ -319,7 +320,7 @@ __global__ void kernShade(
     // Run russian roulette
     if (pathState.bounceCount >= MIN_RUSSIAN_ROULETTE_BOUNCES) {
         float survivalProbability = glm::max(pathState.throughput.x, glm::max(pathState.throughput.y, pathState.throughput.z));
-        survivalProbability = glm::clamp(survivalProbability, 0.05f, 0.95f);
+        survivalProbability = glm::clamp(survivalProbability, minRussianRouletteSurvival, glm::max(0.95f, minRussianRouletteSurvival));
 
         if (u01(rng) > survivalProbability) {
             // Terminate path
@@ -473,6 +474,7 @@ void launchShadeKernel(PathState* dev_pathStates,
     glm::vec4* dev_currentIndirectColor,
     unsigned int* dev_sampleCounts,
     LightSamplingMode lightSamplingMode,
+    float minRussianRouletteSurvival,
     int iteration,
     int frameIndex)
 {
@@ -489,6 +491,7 @@ void launchShadeKernel(PathState* dev_pathStates,
         dev_currentIndirectColor,
         dev_sampleCounts,
         lightSamplingMode,
+        minRussianRouletteSurvival,
         iteration,
         frameIndex);
 }
