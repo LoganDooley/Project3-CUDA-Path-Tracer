@@ -9,33 +9,6 @@
 #include "svgfSettings.h"
 #include <optional>
 
-__global__ void kernCaptureGBuffer(
-	const PathState* dev_pathStates,
-	const IntersectionData* dev_intersectionData,
-	glm::vec4* dev_gBuffer_normalDepth,
-	glm::vec2* dev_gBuffer_motionVectors,
-	glm::vec3* dev_worldPositions, 
-	glm::mat4 currentViewProj,
-	glm::mat4 prevViewProj,
-	int width,
-	int height,
-	int currentActivePathCount);
-
-__global__ void kernTemporalAccumulation(
-	const glm::vec4* dev_gBuffer_normalDepth,
-	const glm::vec2* dev_gBuffer_motionVectors,
-	const glm::vec4* dev_gBuffer_normalDepthPrev,
-	const glm::vec4* dev_pingBuffer,
-	const glm::vec4* dev_illuminationPrev,
-	const glm::vec2* dev_momentsPrev,
-	glm::vec4* dev_integratedColor,
-	glm::vec2* dev_moments,
-	unsigned int* dev_historyLength,
-	const unsigned int* dev_historyLengthPrev,
-	float colorAlphaMin,
-	float momentsAlphaMin,
-	int width, int height);
-
 // SVGF needs to compute direct and indirect separately, so create a channel struct
 // to store all the buffers needed for the reconstruction filter
 struct SVGFChannel {

@@ -10,55 +10,7 @@
 
 #include <memory>
 
-__global__ void kernGenerateCameraRays(
-	PathState* dev_pathStates,
-	int width, int height,
-	glm::vec3 cameraPos,
-	glm::vec3 cameraLook,
-	glm::vec3 cameraRight,
-	glm::vec3 cameraUp,
-	float fovY,
-	int frameIndex,
-	bool bMSAAEnabled,
-	float focalDistance,
-	float lensRadius);
-
-__global__ void kernIntersect(
-	PathState* dev_pathStates,
-	IntersectionData* dev_intersectionData,
-	int activePathCount,
-	DevScene dev_scene
-);
-
-__global__ void kernShade(
-	PathState* dev_pathStates,
-	IntersectionData* dev_intersectionData,
-	DevScene dev_scene,
-	cudaTextureObject_t environmentMap,
-	int activePathCount,
-	cudaSurfaceObject_t surface,
-	glm::vec3* dev_accumulatedColor,
-	glm::vec4* dev_currentDirectColor,
-	glm::vec4* dev_currentIndirectColor,
-	unsigned int* dev_sampleCounts,
-	int width,
-	int iteration,
-	int frameIndex
-);
-
-__global__ void kernColorSurface(
-	cudaSurfaceObject_t surface, 
-	glm::vec3* dev_accumulatedColor,
-	glm::vec4* dev_currentDirectColor,
-	glm::vec4* dev_currentIndirectColor,
-	unsigned int* dev_sampleCounts, 
-	PathState* dev_pathStates, 
-	int activePathCount, 
-	int width);
-
-__global__ void kernDebugRays(PathState* dev_pathStates, cudaSurfaceObject_t surface, int width, int height);
-
-__global__ void fillSurfaceColorKernel(cudaSurfaceObject_t surface, int width, int height, float r, float g, float b);
+// Kernels are internal to kernel.cu, only the launch wrappers are public
 
 void launchCameraRayGenKernel(PathState* dev_pathStates,
 	int width, int height,
