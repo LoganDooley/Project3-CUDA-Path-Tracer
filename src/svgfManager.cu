@@ -2,6 +2,7 @@
 
 #include "intersection.h"
 #include "material.h"
+#include "tonemapping.h"
 
 #include <cuda_runtime.h>
 
@@ -672,16 +673,11 @@ __global__ void kernDebugSVGFIllumination(
 
 	int pixelIndex = y * width + x;
 
-	// Read the accumulated HDR illumination from SVGF
 	glm::vec3 hdrColor = glm::vec3(dev_pingBuffer[pixelIndex]);
 
-	// Apply simple Gamma Correction (2.2) and clamp to visible bounds
-	glm::vec3 finalColor;
-	finalColor.x = glm::clamp(powf(hdrColor.x, 1.0f / 2.2f), 0.0f, 1.0f);
-	finalColor.y = glm::clamp(powf(hdrColor.y, 1.0f / 2.2f), 0.0f, 1.0f);
-	finalColor.z = glm::clamp(powf(hdrColor.z, 1.0f / 2.2f), 0.0f, 1.0f);
+	// Tonemap for display purposes
+	glm::vec3 finalColor = Tonemapping::toDisplayColor(hdrColor);
 
-	// Pack into the uchar4 format your display surface expects
 	uchar4 pixelColor;
 	pixelColor.x = (unsigned char)(finalColor.z * 255.0f); // Blue
 	pixelColor.y = (unsigned char)(finalColor.y * 255.0f); // Green

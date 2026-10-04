@@ -1,6 +1,7 @@
 #include "renderer.h"
 
 #include "intersection.h"
+#include "tonemapping.h"
 
 #include "stb_image_write.h"
 #include "imgui.h"
@@ -131,14 +132,6 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             sortPathsByMaterial(dev_pathStates, dev_intersectionData, currentActivePathCount, scene->dev_materials);
         }
 
-        /*
-        launchDebugUVKernel(dev_intersectionData, m_cudaSurfaceObject, m_extent.width, m_extent.height);
-        m_frameIndex++;
-
-        cudaDeviceSynchronize();
-        return;
-        */
-
         launchShadeKernel(dev_pathStates,
             dev_intersectionData,
             scene,
@@ -191,40 +184,50 @@ void Renderer::saveCurrentRenderToFile(const std::string& filepath)
         return;
     }
 
-    // Copy buffer of accumulated 
-    std::vector<glm::vec3> cpuAccumulatedColor(numPixels);
-    std::vector<unsigned int> cpuSampleCounts(numPixels);
+    // Get the hdr color from the current output
+    std::vector<glm::vec3> hdrColors(numPixels, glm::vec3(0.0f));
 
-    if (cudaMemcpy(cpuAccumulatedColor.data(), dev_accumulatedColor, numPixels * sizeof(glm::vec3), cudaMemcpyDeviceToHost) != cudaSuccess) {
-        throw std::runtime_error("CUDA failed to copy dev_accumulatedColor to the cpu");
+    if (m_renderSettings.bSVGFEnabled) {
+        std::vector<glm::vec4> cpuFilteredColor(numPixels);
+        if (cudaMemcpy(cpuFilteredColor.data(), m_svgfManager.dev_outputColor, numPixels * sizeof(glm::vec4), cudaMemcpyDeviceToHost) != cudaSuccess) {
+            throw std::runtime_error("CUDA failed to copy SVGF output to the cpu");
+        }
+
+        for (int i = 0; i < numPixels; i++) {
+            hdrColors[i] = glm::vec3(cpuFilteredColor[i]);
+        }
     }
+    else {
+        std::vector<glm::vec3> cpuAccumulatedColor(numPixels);
+        std::vector<unsigned int> cpuSampleCounts(numPixels);
 
-    if (cudaMemcpy(cpuSampleCounts.data(), dev_sampleCounts, numPixels * sizeof(unsigned int), cudaMemcpyDeviceToHost) != cudaSuccess) {
-        throw std::runtime_error("CUDA failed to copy dev_sampleCounts to the cpu");
+        if (cudaMemcpy(cpuAccumulatedColor.data(), dev_accumulatedColor, numPixels * sizeof(glm::vec3), cudaMemcpyDeviceToHost) != cudaSuccess) {
+            throw std::runtime_error("CUDA failed to copy dev_accumulatedColor to the cpu");
+        }
+
+        if (cudaMemcpy(cpuSampleCounts.data(), dev_sampleCounts, numPixels * sizeof(unsigned int), cudaMemcpyDeviceToHost) != cudaSuccess) {
+            throw std::runtime_error("CUDA failed to copy dev_sampleCounts to the cpu");
+        }
+
+        for (int i = 0; i < numPixels; i++) {
+            unsigned int samples = cpuSampleCounts[i];
+            if (samples > 0) {
+                hdrColors[i] = cpuAccumulatedColor[i] / static_cast<float>(samples);
+            }
+        }
     }
 
     // Convert to format readable by stb image
     std::vector<uint8_t> outputImage(numPixels * 3);
 
     for (int i = 0; i < numPixels; i++) {
-        unsigned int samples = cpuSampleCounts[i];
-        glm::vec3 accumulatedColor = cpuAccumulatedColor[i];
-
-        glm::vec3 color = glm::vec3(0.0f);
-
-        if (samples > 0) {
-            color = accumulatedColor / static_cast<float>(samples);
-        }
-
-        // Gamma correct like in the path tracer
-        float r = std::clamp(std::pow(color.x, 1.0f / 2.2f), 0.0f, 1.0f);
-        float g = std::clamp(std::pow(color.y, 1.0f / 2.2f), 0.0f, 1.0f);
-        float b = std::clamp(std::pow(color.z, 1.0f / 2.2f), 0.0f, 1.0f);
+        // Tonemap + gamma correct like we do in the cuda kernels
+        glm::vec3 color = Tonemapping::toDisplayColor(hdrColors[i]);
 
         // Write into output image buffer
-        outputImage[i * 3 + 0] = static_cast<uint8_t>(r * 255.99f);
-        outputImage[i * 3 + 1] = static_cast<uint8_t>(g * 255.99f);
-        outputImage[i * 3 + 2] = static_cast<uint8_t>(b * 255.99f);
+        outputImage[i * 3 + 0] = static_cast<uint8_t>(color.r * 255.99f);
+        outputImage[i * 3 + 1] = static_cast<uint8_t>(color.g * 255.99f);
+        outputImage[i * 3 + 2] = static_cast<uint8_t>(color.b * 255.99f);
     }
 
     stbi_flip_vertically_on_write(false);
@@ -307,7 +310,7 @@ void Renderer::cleanup()
 
     if (dev_accumulatedColor) {
         cudaFree(dev_accumulatedColor);
-        dev_sampleCounts = nullptr;
+        dev_accumulatedColor = nullptr;
     }
 
     m_activeRayCount = 0;

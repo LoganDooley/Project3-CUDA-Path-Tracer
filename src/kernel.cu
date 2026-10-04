@@ -14,6 +14,7 @@
 #include "samplers.h"
 #include "material.h"
 #include "intersection.h"
+#include "tonemapping.h"
 
 #define MIN_RUSSIAN_ROULETTE_BOUNCES 2
 
@@ -43,14 +44,6 @@ __host__ __device__ int divup(int a, int b) {
 __device__ void get2DIndex(int index1D, int width, int* outX, int* outY) {
     *outX = index1D % width;
     *outY = index1D / width;
-}
-
-__device__ glm::vec3 reinhardToneMap(const glm::vec3& color) {
-    return color / (color + glm::vec3(1.0f));
-}
-
-__device__ glm::vec3 gammaCorrect(const glm::vec3& color, float gamma) {
-    return glm::clamp(glm::pow(color, glm::vec3(1.0f / gamma)), 0.0f, 1.0f);
 }
 
 __device__ uchar4 convertColorToUChar4(const glm::vec3& color) {
@@ -94,9 +87,7 @@ __device__ void writePathStateToSurface(const PathState& pathState,
     // Get average color over all samples
     glm::vec3 averageColor = dev_accumulatedColor[pixelIndex] / (float)(currentSampleIndex + 1);
 
-	glm::vec3 tonemappedColor = reinhardToneMap(averageColor);
-
-	glm::vec3 finalColor = gammaCorrect(tonemappedColor, 2.2f);
+	glm::vec3 finalColor = Tonemapping::toDisplayColor(averageColor);
 
 	uchar4 pixelColor = convertColorToUChar4(finalColor);
 
