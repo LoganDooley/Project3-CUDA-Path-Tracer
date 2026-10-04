@@ -45,6 +45,14 @@ public:
 		outBitangent = glm::vec3(b, sign + inNormal.y * inNormal.y * a, -inNormal.y);
 	}
 
+	__host__ __device__ static bool isFinite(const glm::vec3& v) {
+		return isfinite(v.x) && isfinite(v.y) && isfinite(v.z);
+	}
+
+	__host__ __device__ static bool isFinite(const glm::vec2& v) {
+		return isfinite(v.x) && isfinite(v.y);
+	}
+
 	__host__ __device__ static float powerHeuristic(float pdfA, float pdfB) {
 		return (pdfA * pdfA) / (pdfA * pdfA + pdfB * pdfB);
 	}

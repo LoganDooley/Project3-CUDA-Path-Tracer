@@ -241,6 +241,11 @@ __global__ void kernTemporalAccumulation(
 		totalBilinearWeight += w11; 
 	}
 
+	if (!MathHelpers::isFinite(glm::vec3(accumulatedColor)) || !MathHelpers::isFinite(accumulatedMoments)) {
+		// Sometimes these can be infinte or nan so if that is the case, set the weight to 0 so it can be reset to 1 spp
+		totalBilinearWeight = 0.0f;
+	}
+
 	if (totalBilinearWeight > 0.0f) {
 		// Normalize attributes
 		accumulatedColor /= totalBilinearWeight;

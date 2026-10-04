@@ -64,12 +64,20 @@ __device__ void recordPathSample(const PathState& pathState,
 
     atomicAdd(&dev_sampleCounts[pixelIndex], 1);
 
-    dev_accumulatedColor[pixelIndex] += pathState.accumulatedColor;
+    glm::vec3 radiance = pathState.accumulatedColor;
+    glm::vec3 directRadiance = pathState.directColor;
+    if (!MathHelpers::isFinite(radiance) || !MathHelpers::isFinite(directRadiance)) {
+        // If the radiance is ever not finite, discard it
+        radiance = glm::vec3(0.0f);
+        directRadiance = glm::vec3(0.0f);
+    }
+
+    dev_accumulatedColor[pixelIndex] += radiance;
     if (dev_currentDirectColor != nullptr && dev_currentIndirectColor != nullptr) {
         // Record direct and indirect color for svgf filtering
         float hitValue = bHit ? 1.0f : 0.0f;
-        dev_currentDirectColor[pixelIndex] = glm::vec4(pathState.directColor, hitValue);
-        dev_currentIndirectColor[pixelIndex] = glm::vec4(pathState.accumulatedColor - pathState.directColor, hitValue);
+        dev_currentDirectColor[pixelIndex] = glm::vec4(directRadiance, hitValue);
+        dev_currentIndirectColor[pixelIndex] = glm::vec4(radiance - directRadiance, hitValue);
     }
 }
 
