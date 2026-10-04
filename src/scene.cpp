@@ -3,7 +3,7 @@
 #include "bvh.h"
 #include "material.h"
 #include "pathTraceCommon.h"
-#include "texture.h"
+#include "textureLoader.h"
 #include "cudaHelpers.h"
 
 // External Includes

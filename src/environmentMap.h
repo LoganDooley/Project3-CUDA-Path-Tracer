@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 
 #include <vector>
+#include <string>
 
 // Environment map data for CUDA similar to DevScene
 struct DevEnvironmentMap {
@@ -17,6 +18,7 @@ struct DevEnvironmentMap {
 class EnvironmentMap {
 public:
 	EnvironmentMap(float* imageData, size_t width, size_t height);
+	EnvironmentMap(const std::string& filepath);
 	~EnvironmentMap();
 
 	EnvironmentMap& operator=(const EnvironmentMap&) = delete;

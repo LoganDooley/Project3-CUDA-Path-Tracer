@@ -1,6 +1,7 @@
 #include "environmentMap.h"
 
 #include "cudaHelpers.h"
+#include "textureLoader.h"
 
 #include <glm/gtc/constants.hpp>
 
@@ -34,6 +35,51 @@ EnvironmentMap::EnvironmentMap(float* imageData, size_t width, size_t height)
         height,
         cudaMemcpyHostToDevice
     ));
+
+    cudaResourceDesc resDesc = {};
+    resDesc.resType = cudaResourceTypeArray;
+    resDesc.res.array.array = m_environmentMapArray;
+
+    cudaTextureDesc texDesc = {};
+    texDesc.addressMode[0] = cudaAddressModeWrap;  // Wrap U for spherical map
+    texDesc.addressMode[1] = cudaAddressModeClamp; // Clamp V for poles
+    texDesc.filterMode = cudaFilterModeLinear;
+    texDesc.readMode = cudaReadModeElementType;
+    texDesc.normalizedCoords = 1;
+
+    if (cudaCreateTextureObject(&m_environmentMapTexture, &resDesc, &texDesc, nullptr) != cudaSuccess) {
+        cudaFreeArray(m_environmentMapArray);
+        m_environmentMapArray = nullptr;
+        m_environmentMapTexture = 0;
+    }
+}
+
+EnvironmentMap::EnvironmentMap(const std::string& filepath)
+{
+    int width, height, channels;
+    // Force 4 channels for cuda
+    float* imageData = stbi_loadf(filepath.c_str(), &width, &height, &channels, 4);
+
+    if (!imageData) {
+		std::cerr << "Failed to load environment map: " << filepath << std::endl;
+        return;
+    }
+
+    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float4>();
+    CUDA_CHECK(cudaMallocArray(&m_environmentMapArray, &channelDesc, width, height));
+
+    size_t pitch = width * sizeof(float) * 4;
+    CUDA_CHECK(cudaMemcpy2DToArray(
+        m_environmentMapArray,
+        0, 0,
+        imageData,
+        pitch,
+        pitch,
+        height,
+        cudaMemcpyHostToDevice
+    ));
+
+	stbi_image_free(imageData);
 
     cudaResourceDesc resDesc = {};
     resDesc.resType = cudaResourceTypeArray;

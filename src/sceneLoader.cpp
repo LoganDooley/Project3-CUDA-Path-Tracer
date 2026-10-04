@@ -3,7 +3,7 @@
 // Project Includes
 #include "scene.h"
 #include "bvh.h"
-#include "texture.h"
+#include "textureLoader.h"
 
 // External Includes
 #include <cuda_runtime.h>
@@ -504,7 +504,13 @@ void parseGltfMaterials(const tg3_model& model, const std::string& baseDir, std:
                 const tg3_buffer_view& view = model.buffer_views[image.buffer_view];
                 const tg3_buffer& buffer = model.buffers[view.buffer];
 
-                if (!Texture::LoadTextureFromMemory(buffer.data.data + view.byte_offset, view.byte_length, outTextures[i], outTextureArrays[i])) {
+                cudaTextureDesc texDesc = {};
+                texDesc.addressMode[0] = cudaAddressModeWrap;
+                texDesc.addressMode[1] = cudaAddressModeWrap;
+                texDesc.filterMode = cudaFilterModeLinear;
+                texDesc.readMode = cudaReadModeNormalizedFloat;
+                texDesc.normalizedCoords = 1;
+                if (!TextureLoader::LoadTextureFromMemory(buffer.data.data + view.byte_offset, view.byte_length, outTextures[i], outTextureArrays[i], texDesc)) {
                     std::cerr << "Failed to load embedded image " << i << std::endl;
                 }
                 continue;
@@ -519,7 +525,14 @@ void parseGltfMaterials(const tg3_model& model, const std::string& baseDir, std:
             // Load texture from filepath
             std::string uri(image.uri.data, image.uri.len);
             std::string fullImagePath = baseDir + uri;
-            if (!Texture::LoadTexture(fullImagePath.c_str(), outTextures[i], outTextureArrays[i])) {
+
+            cudaTextureDesc texDesc = {};
+            texDesc.addressMode[0] = cudaAddressModeWrap;
+            texDesc.addressMode[1] = cudaAddressModeWrap;
+            texDesc.filterMode = cudaFilterModeLinear;
+            texDesc.readMode = cudaReadModeNormalizedFloat;
+            texDesc.normalizedCoords = 1;
+            if (!TextureLoader::LoadTexture(fullImagePath.c_str(), outTextures[i], outTextureArrays[i], texDesc)) {
                 std::cerr << "Failed to load texture: " << fullImagePath << std::endl;
             }
         }
@@ -779,7 +792,13 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, con
                 cudaTextureObject_t textureObject = 0;
                 cudaArray_t textureArray = nullptr;
 
-                if (Texture::LoadTexture(fullTexPath.c_str(), textureObject, textureArray)) {
+                cudaTextureDesc texDesc = {};
+                texDesc.addressMode[0] = cudaAddressModeWrap;
+                texDesc.addressMode[1] = cudaAddressModeWrap;
+                texDesc.filterMode = cudaFilterModeLinear;
+                texDesc.readMode = cudaReadModeNormalizedFloat;
+                texDesc.normalizedCoords = 1;
+                if (TextureLoader::LoadTexture(fullTexPath.c_str(), textureObject, textureArray, texDesc)) {
                     loadedTextures.push_back(textureObject);
                     loadedTextureArrays.push_back(textureArray);
                     textureCache[fullTexPath] = textureObject;

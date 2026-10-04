@@ -15,8 +15,6 @@ struct Material;
 struct DevScene {
 	__device__ IntersectionData intersect(const Ray& ray);
 
-	__device__ bool isVisible(const Ray& ray, float tMax);
-
 	__device__ glm::vec3 nextEventEstimation(const glm::vec4& random, const Ray& incomingRay, const IntersectionData& intersectionData, glm::vec3& outDirectionToLight, float& outPdf);
 
 	Geom* dev_geometry = nullptr;
@@ -35,4 +33,7 @@ struct DevScene {
 	size_t m_materialCount = 0;
 
 	size_t m_lightCount = 0;
+
+private:
+	__device__ bool isVisible(const Ray& ray, float tMax);
 };

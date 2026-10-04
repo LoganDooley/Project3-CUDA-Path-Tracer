@@ -909,15 +909,7 @@ void Application::pickEnvironmentMap()
 
 	std::string environmentMapPath = outPath.get();
 
-	int width, height, channels;
-	// Force 4 channels for cuda
-	float* imageData = stbi_loadf(environmentMapPath.c_str(), &width, &height, &channels, 4);
-
-	if (!imageData) {
-		return;
-	}
-
-	m_currentEnvironmentMap = std::make_unique<EnvironmentMap>(imageData, width, height);
+	m_currentEnvironmentMap = std::make_unique<EnvironmentMap>(environmentMapPath);
 	m_camera.m_hasChanged = true;
 }
 

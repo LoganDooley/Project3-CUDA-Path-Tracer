@@ -4,16 +4,13 @@
 #include "samplers.h"
 #include "intersection.h"
 
-#define USE_TLAS 1
-
 __device__ IntersectionData DevScene::intersect(const Ray& ray) {
     IntersectionData result = IntersectionData{};
 
-#if USE_TLAS
     int tlasIterationCount = 0;
     int blasIterationCount = 0;
 
-    int nodeStack[32];
+    int nodeStack[32]; // We limit the depth of the tree when building it to not surpass this stack
     int stackPtr = 0;
 
     nodeStack[stackPtr++] = 0; // tlas node index 0 is always the root
@@ -63,25 +60,8 @@ __device__ IntersectionData DevScene::intersect(const Ray& ray) {
 
     result.tlasIterationCount = tlasIterationCount;
     result.blasIterationCount = blasIterationCount;
-#else
-    for (int i = 0; i < m_geometryCount; i++) {
-        IntersectionData intersection = IntersectionStatics::intersectGeometry(ray, dev_geometry[i], dev_blasNodes, dev_triangles);
-        if (intersection.t > 0.0f) {
-            if (result.t < 0.0f || intersection.t < result.t) {
-                result = intersection;
-                result.geometryIndex = i;
-            }
-        }
-    }
-#endif
 
     return result;
-}
-
-__device__ bool DevScene::isVisible(const Ray& ray, float tMax)
-{
-    IntersectionData result = intersect(ray);
-    return result.t < 0.0f || result.t > tMax;
 }
 
 __device__ glm::vec3 DevScene::nextEventEstimation(const glm::vec4& random, 
@@ -151,4 +131,10 @@ __device__ glm::vec3 DevScene::nextEventEstimation(const glm::vec4& random,
 	outPdf = pArea * (distance * distance / cosThetaLight);
 
     return lightMaterial.emittance * lightMaterial.albedo;
+}
+
+__device__ bool DevScene::isVisible(const Ray& ray, float tMax)
+{
+    IntersectionData result = intersect(ray);
+    return result.t < 0.0f || result.t > tMax;
 }
