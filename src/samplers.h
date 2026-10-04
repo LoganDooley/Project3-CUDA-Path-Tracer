@@ -42,7 +42,7 @@ public:
 		return outgoingDirection;
 	}
 
-	__host__ __device__ static glm::vec3 sampleGeometry(const Geom& geometry, const Triangle* dev_triangles, glm::vec3& random, glm::vec3& outNormal, float& outPdf) {
+	__host__ __device__ static glm::vec3 sampleGeometry(const Geom& geometry, const Triangle* dev_triangles, const glm::vec3& random, glm::vec3& outNormal, float& outPdf) {
 		glm::vec3 localSamplePoint = glm::vec3(0.0f);
 		glm::vec3 localSampleNormal = glm::vec3(0.0f);
 		float localPdf = 1.0f;

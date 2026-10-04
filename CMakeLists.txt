@@ -83,7 +83,9 @@ PRIVATE
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:
 		--expt-relaxed-constexpr
+		--diag-suppress=20012 # Hide warnings from glm
 		-Xcompiler=/std:c++17
+		-Xcompiler=/Zc:preprocessor
         $<$<CONFIG:Debug>:-G>
         $<$<CONFIG:Release>:-O3>
         --generate-line-info
