@@ -73,21 +73,6 @@ __device__ void recordPathSample(const PathState& pathState,
     }
 }
 
-__device__ glm::vec3 sampleEnvironmentMap(cudaTextureObject_t environmentMap, const glm::vec3& direction) {
-    if (environmentMap == 0) {
-        return glm::vec3(0.0f);
-    }
-
-    float theta = glm::acos(direction.y);
-    float phi = atan2f(direction.z, direction.x);
-
-    float u = 1.0f - (phi + glm::pi<float>()) / (2.0f * glm::pi<float>());
-    float v = theta / glm::pi<float>();
-
-    float4 sampled = tex2D<float4>(environmentMap, u, v);
-    return glm::vec3(sampled.x, sampled.y, sampled.z);
-}
-
 __device__ void applyCameraDepthOfField(Ray& ray, 
     const glm::vec2& random, 
     glm::vec3& cameraLook,
@@ -199,7 +184,7 @@ __global__ void kernShade(
     PathState* dev_pathStates,
     IntersectionData* dev_intersectionData,
     DevScene dev_scene,
-    cudaTextureObject_t environmentMap,
+    DevEnvironmentMap environmentMap,
     int activePathCount,
     glm::vec3* dev_accumulatedColor,
     glm::vec4* dev_currentDirectColor,
@@ -226,7 +211,7 @@ __global__ void kernShade(
     // Handle misses
     if (intersectionData.t <= 0.0f) {
         // Considered direct if from the camera or off of the first bounce
-        addRadiance(pathState, pathState.throughput * sampleEnvironmentMap(environmentMap, pathState.ray.direction), pathState.bounceCount <= 1);
+        addRadiance(pathState, pathState.throughput * environmentMap.sample(pathState.ray.direction), pathState.bounceCount <= 1);
         pathState.active = false;
         recordPathSample(pathState, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, pathState.bounceCount == 0);
         return;
@@ -497,7 +482,7 @@ void launchShadeKernel(PathState* dev_pathStates,
     kernShade << <gridSize, blockSize >> > (dev_pathStates,
         dev_intersectionData,
         scene != nullptr ? scene->getDevScene() : DevScene{},
-        environmentMap != nullptr ? environmentMap->m_environmentMapTexture : 0,
+        environmentMap != nullptr ? environmentMap->getDevEnvironmentMap() : DevEnvironmentMap{},
         activePathCount,
         dev_accumulatedColor,
         dev_currentDirectColor,

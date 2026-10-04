@@ -2,6 +2,23 @@
 
 #include "cudaHelpers.h"
 
+#include <glm/gtc/constants.hpp>
+
+__device__ glm::vec3 DevEnvironmentMap::sample(const glm::vec3& direction) const {
+    if (texture == 0) {
+        return glm::vec3(0.0f);
+    }
+
+    float theta = glm::acos(direction.y);
+    float phi = atan2f(direction.z, direction.x);
+
+    float u = 1.0f - (phi + glm::pi<float>()) / (2.0f * glm::pi<float>());
+    float v = theta / glm::pi<float>();
+
+    float4 sampled = tex2D<float4>(texture, u, v);
+    return intensity * glm::vec3(sampled.x, sampled.y, sampled.z);
+}
+
 EnvironmentMap::EnvironmentMap(float* imageData, size_t width, size_t height)
 {
     cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float4>();
@@ -64,6 +81,7 @@ EnvironmentMap& EnvironmentMap::operator=(EnvironmentMap&& other) noexcept
 
         m_environmentMapTexture = other.m_environmentMapTexture;
         m_environmentMapArray = other.m_environmentMapArray;
+        m_intensity = other.m_intensity;
 
         other.m_environmentMapTexture = 0;
         other.m_environmentMapArray = nullptr;
@@ -74,6 +92,7 @@ EnvironmentMap& EnvironmentMap::operator=(EnvironmentMap&& other) noexcept
 
 EnvironmentMap::EnvironmentMap(EnvironmentMap&& other) noexcept :
     m_environmentMapTexture(other.m_environmentMapTexture),
+    m_intensity(other.m_intensity),
     m_environmentMapArray(other.m_environmentMapArray)
 {
     other.m_environmentMapTexture = 0;

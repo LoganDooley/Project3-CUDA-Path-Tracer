@@ -723,6 +723,11 @@ void Application::renderImGui()
 	if (ImGui::Button("Clear Environment Map")) {
 		clearEnvironmentMap();
 	}
+	if (m_currentEnvironmentMap != nullptr) {
+		if (ImGui::SliderFloat("Environment Intensity", &m_currentEnvironmentMap->m_intensity, 0.0f, 10.0f)) {
+			m_camera.m_hasChanged = true;
+		}
+	}
 	if (ImGui::Button("Save Render to File")) {
 		saveCurrentRender();
 	}

@@ -895,8 +895,8 @@ std::unique_ptr<Scene> SceneLoader::loadFromObj(const std::string& filepath, con
         }
 
         // Check for perfect glass
-        if(objMaterial.illum == 4 || objMaterial.illum == 9 || objMaterial.dissolve < 1.0f ||
-            objMaterial.transmittance[0] > 0.0f || objMaterial.transmittance[1] > 0.0f || objMaterial.transmittance[2] > 0.0f) {
+        bool bTransparentIllum = objMaterial.illum == 4 || objMaterial.illum == 6 || objMaterial.illum == 7 || objMaterial.illum == 9;
+        if (bTransparentIllum || objMaterial.dissolve < 1.0f) {
             mat.type = MaterialType::PerfectSpecular;
             mat.blinnPhong.bRefractive = true;
             if(mat.ior <= 1.0f) {

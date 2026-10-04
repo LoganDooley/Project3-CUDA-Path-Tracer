@@ -102,17 +102,9 @@ __global__ void kernCaptureGBuffer(
 		}
 	}
 
-	// Avoid dividing by 0
-	if (albedo.x < 1e-3f) {
-		albedo.x = 1.0f;
-	}
-	if(albedo.y < 1e-3f) {
-		albedo.y = 1.0f;
-	}
-	if(albedo.z < 1e-3f) {
-		albedo.z = 1.0f;
-	}
-	dev_gBuffer_albedo[pixelIdx] = albedo;
+	// Clamp albedo to a minimum to avoid divide by zero
+	const float minDemodulationAlbedo = 0.01f;
+	dev_gBuffer_albedo[pixelIdx] = glm::max(albedo, glm::vec3(minDemodulationAlbedo));
 }
 __device__ bool isHistoryValid(
 	glm::vec3 currNormal, float currDepth,

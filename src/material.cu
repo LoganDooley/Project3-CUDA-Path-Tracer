@@ -22,8 +22,9 @@ __device__ void Material::initializeFromIntersection(const IntersectionData& int
 	if(type == MaterialType::PbrMetallicRoughness && pbr.metallicRoughnessTexture != 0) {
 		float4 texColor = tex2D<float4>(pbr.metallicRoughnessTexture, u, v);
 
-		pbr.metallic *= texColor.y;
-		pbr.roughness *= texColor.z;
+		// Format is red is unused, green is roughness, and blue is metallic
+		pbr.roughness *= texColor.y;
+		pbr.metallic *= texColor.z;
 	}
 }
 
