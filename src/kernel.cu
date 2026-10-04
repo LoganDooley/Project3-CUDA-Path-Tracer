@@ -53,17 +53,16 @@ __device__ void addRadiance(PathState& pathState, const glm::vec3& radiance, boo
     }
 }
 
-__device__ void writePathStateToSurface(const PathState& pathState, 
-    cudaSurfaceObject_t surface, 
+// Add a path's accumulated radiance when terminated
+__device__ void recordPathSample(const PathState& pathState,
     glm::vec3* dev_accumulatedColor,
     glm::vec4* dev_currentDirectColor,
     glm::vec4* dev_currentIndirectColor,
-    unsigned int* dev_sampleCounts, 
-    int width,
+    unsigned int* dev_sampleCounts,
     bool bHit) {
     int pixelIndex = pathState.pixelIndex;
 
-    unsigned int currentSampleIndex = atomicAdd(&dev_sampleCounts[pixelIndex], 1);
+    atomicAdd(&dev_sampleCounts[pixelIndex], 1);
 
     dev_accumulatedColor[pixelIndex] += pathState.accumulatedColor;
     if (dev_currentDirectColor != nullptr && dev_currentIndirectColor != nullptr) {
@@ -72,17 +71,6 @@ __device__ void writePathStateToSurface(const PathState& pathState,
         dev_currentDirectColor[pixelIndex] = glm::vec4(pathState.directColor, hitValue);
         dev_currentIndirectColor[pixelIndex] = glm::vec4(pathState.accumulatedColor - pathState.directColor, hitValue);
     }
-
-    // Get average color over all samples
-    glm::vec3 averageColor = dev_accumulatedColor[pixelIndex] / (float)(currentSampleIndex + 1);
-
-	glm::vec3 finalColor = Tonemapping::toDisplayColor(averageColor);
-
-    int pixelIndexX = 0;
-    int pixelIndexY = 0;
-    get2DIndex(pixelIndex, width, &pixelIndexX, &pixelIndexY);
-
-    writeSurfacePixel(surface, pixelIndexX, pixelIndexY, finalColor);
 }
 
 __device__ glm::vec3 sampleEnvironmentMap(cudaTextureObject_t environmentMap, const glm::vec3& direction) {
@@ -213,12 +201,10 @@ __global__ void kernShade(
     DevScene dev_scene,
     cudaTextureObject_t environmentMap,
     int activePathCount,
-    cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
     glm::vec4* dev_currentDirectColor,
     glm::vec4* dev_currentIndirectColor,
     unsigned int* dev_sampleCounts,
-    int width,
     int iteration,
     int frameIndex)
 {
@@ -241,7 +227,7 @@ __global__ void kernShade(
         // Considered direct if from the camera or off of the first bounce
         addRadiance(pathState, pathState.throughput * sampleEnvironmentMap(environmentMap, pathState.ray.direction), pathState.bounceCount <= 1);
         pathState.active = false;
-        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, width, pathState.bounceCount == 0);
+        recordPathSample(pathState, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, pathState.bounceCount == 0);
         return;
     }
 
@@ -249,7 +235,7 @@ __global__ void kernShade(
     if (intersectionData.materialIndex < 0 || intersectionData.materialIndex >= dev_scene.m_materialCount) {
         // Still record the path so the pixel's sample count and SVGF input stay in sync
         pathState.active = false;
-        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, width, true);
+        recordPathSample(pathState, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, true);
         return;
     }
 
@@ -272,7 +258,7 @@ __global__ void kernShade(
 
         // Hitting a light terminates the path
         pathState.active = false;
-        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, width, true);
+        recordPathSample(pathState, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, true);
         return;
     }
 
@@ -326,7 +312,7 @@ __global__ void kernShade(
     // Handle invalid pdf or throughput
 	if (brdfPdf <= 0.0f || glm::all(glm::lessThanEqual(sampleThroughput, glm::vec3(0.0f)))) {
         pathState.active = false;
-        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, width, true);
+        recordPathSample(pathState, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, true);
         return;
 	}
 
@@ -344,7 +330,7 @@ __global__ void kernShade(
         if (u01(rng) > survivalProbability) {
             // Terminate path
             pathState.active = false;
-            writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, width, true);
+            recordPathSample(pathState, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, true);
             return;
         }
 
@@ -429,24 +415,46 @@ __global__ void kernDebugBvhHeatmap(cudaSurfaceObject_t surface,
     writeSurfacePixel(surface, pixelX, pixelY, color);
 }
 
-__global__ void kernColorSurface(cudaSurfaceObject_t surface,
+__global__ void kernRecordActivePaths(const PathState* dev_pathStates,
+    int activePathCount,
     glm::vec3* dev_accumulatedColor,
     glm::vec4* dev_currentDirectColor,
     glm::vec4* dev_currentIndirectColor,
-    unsigned int* dev_sampleCounts, 
-    PathState* dev_pathStates, 
-    int n, 
-    int width)
+    unsigned int* dev_sampleCounts)
 {
     int index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (index >= n) {
+    if (index >= activePathCount) {
         return;
     }
 
-    PathState currentPathState = dev_pathStates[index];
+    const PathState& pathState = dev_pathStates[index];
+    if (!pathState.active) {
+        return;
+    }
 
-    writePathStateToSurface(currentPathState, surface, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, width, true);
+    recordPathSample(pathState, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, true);
+}
+
+// Draw recorded sample average to the surface
+__global__ void kernDisplayAccumulatedSamples(cudaSurfaceObject_t surface,
+    const glm::vec3* dev_accumulatedColor,
+    const unsigned int* dev_sampleCounts,
+    int width, int height)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x >= width || y >= height) {
+        return;
+    }
+
+    int pixelIndex = y * width + x;
+
+    unsigned int sampleCount = dev_sampleCounts[pixelIndex];
+    glm::vec3 averageColor = sampleCount > 0 ? dev_accumulatedColor[pixelIndex] / (float)sampleCount : glm::vec3(0.0f);
+
+    writeSurfacePixel(surface, x, y, Tonemapping::toDisplayColor(averageColor));
 }
 
 void launchCameraRayGenKernel(
@@ -483,12 +491,10 @@ void launchShadeKernel(PathState* dev_pathStates,
     const std::unique_ptr<Scene>& scene,
     const std::unique_ptr<EnvironmentMap>& environmentMap,
     int activePathCount,
-    cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
     glm::vec4* dev_currentDirectColor,
     glm::vec4* dev_currentIndirectColor,
     unsigned int* dev_sampleCounts,
-    int width,
     int iteration,
     int frameIndex)
 {
@@ -500,36 +506,44 @@ void launchShadeKernel(PathState* dev_pathStates,
         scene != nullptr ? scene->getDevScene() : DevScene{},
         environmentMap != nullptr ? environmentMap->m_environmentMapTexture : 0,
         activePathCount,
-        surface,
         dev_accumulatedColor,
         dev_currentDirectColor,
         dev_currentIndirectColor,
         dev_sampleCounts,
-        width,
         iteration,
         frameIndex);
 }
 
-void launchColorSurfaceKernel(PathState* dev_pathStates,
+void launchRecordActivePathsKernel(PathState* dev_pathStates,
     int activePathCount,
-    cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
     glm::vec4* dev_currentDirectColor,
     glm::vec4* dev_currentIndirectColor,
-    unsigned int* dev_sampleCounts,
-    int width)
+    unsigned int* dev_sampleCounts)
 {
     dim3 blockSize(32);
     dim3 gridSize(divup(activePathCount, blockSize.x));
 
-    kernColorSurface<<<gridSize, blockSize>>>(surface, 
+    kernRecordActivePaths << <gridSize, blockSize >> > (dev_pathStates,
+        activePathCount,
         dev_accumulatedColor,
         dev_currentDirectColor,
         dev_currentIndirectColor,
+        dev_sampleCounts);
+}
+
+void launchDisplayAccumulatedSamplesKernel(cudaSurfaceObject_t surface,
+    glm::vec3* dev_accumulatedColor,
+    unsigned int* dev_sampleCounts,
+    int width, int height)
+{
+    dim3 blockSize(16, 16);
+    dim3 gridSize = make2DGrid(width, height, blockSize);
+
+    kernDisplayAccumulatedSamples << <gridSize, blockSize >> > (surface,
+        dev_accumulatedColor,
         dev_sampleCounts,
-        dev_pathStates, 
-        activePathCount, 
-        width);
+        width, height);
 }
 
 void launchBvhHeatmapKernel(PathState* dev_pathStates,

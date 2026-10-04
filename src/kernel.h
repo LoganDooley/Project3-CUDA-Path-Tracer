@@ -11,8 +11,6 @@
 
 #include <memory>
 
-// Kernels are internal to kernel.cu, only the launch wrappers are public
-
 void launchCameraRayGenKernel(PathState* dev_pathStates,
 	int width, int height,
 	const Camera& camera,
@@ -29,23 +27,24 @@ void launchShadeKernel(PathState* dev_pathStates,
 	const std::unique_ptr<Scene>& scene,
 	const std::unique_ptr<EnvironmentMap>& environmentMap,
 	int activePathCount,
-	cudaSurfaceObject_t surface,
 	glm::vec3* dev_accumulatedColor,
 	glm::vec4* dev_currentDirectColor,
 	glm::vec4* dev_currentIndirectColor,
 	unsigned int* dev_sampleCounts,
-	int width,
 	int iteration,
 	int frameIndex);
 
-void launchColorSurfaceKernel(PathState* dev_pathStates,
+void launchRecordActivePathsKernel(PathState* dev_pathStates,
 	int activePathCount,
-	cudaSurfaceObject_t surface,
 	glm::vec3* dev_accumulatedColor,
 	glm::vec4* dev_currentDirectColor,
 	glm::vec4* dev_currentIndirectColor,
+	unsigned int* dev_sampleCounts);
+
+void launchDisplayAccumulatedSamplesKernel(cudaSurfaceObject_t surface,
+	glm::vec3* dev_accumulatedColor,
 	unsigned int* dev_sampleCounts,
-	int width);
+	int width, int height);
 
 void launchDebugUVKernel(IntersectionData* dev_intersectionData, cudaSurfaceObject_t surface, int width, int height);
 

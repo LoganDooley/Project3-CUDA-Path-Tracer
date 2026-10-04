@@ -135,12 +135,10 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             scene,
             environmentMap,
             currentActivePathCount,
-            m_cudaSurfaceObject,
             dev_accumulatedColor,
             m_renderSettings.bSVGFEnabled ? m_svgfManager.directChannel.dev_pingBuffer : nullptr,
             m_renderSettings.bSVGFEnabled ? m_svgfManager.indirectChannel.dev_pingBuffer : nullptr,
             dev_sampleCounts,
-            m_extent.width,
             i,
             m_frameIndex);
 
@@ -151,16 +149,15 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
     }
 
     if (currentActivePathCount > 0) {
-        launchColorSurfaceKernel(dev_pathStates, 
-            currentActivePathCount, 
-            m_cudaSurfaceObject, 
+        launchRecordActivePathsKernel(dev_pathStates,
+            currentActivePathCount,
             dev_accumulatedColor,
             m_renderSettings.bSVGFEnabled ? m_svgfManager.directChannel.dev_pingBuffer : nullptr,
             m_renderSettings.bSVGFEnabled ? m_svgfManager.indirectChannel.dev_pingBuffer : nullptr,
-            dev_sampleCounts,
-            m_extent.width);
+            dev_sampleCounts);
     }
 
+    // Draw to screen either through SVGF or our accumulated color buffer
     if (m_renderSettings.bSVGFEnabled) {
         // Run svgf
         m_svgfManager.evaluate();
@@ -168,6 +165,13 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
         m_svgfManager.debugIlluminance(m_cudaSurfaceObject);
 
         m_svgfManager.swapBuffers();
+    }
+    else {
+        launchDisplayAccumulatedSamplesKernel(m_cudaSurfaceObject,
+            dev_accumulatedColor,
+            dev_sampleCounts,
+            m_extent.width,
+            m_extent.height);
     }
 
     m_frameIndex++;
