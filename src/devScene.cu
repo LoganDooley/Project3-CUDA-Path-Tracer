@@ -10,13 +10,16 @@ __device__ IntersectionData DevScene::intersect(const Ray& ray) {
     IntersectionData result = IntersectionData{};
 
 #if USE_TLAS
+    int tlasIterationCount = 0;
+    int blasIterationCount = 0;
+
     int nodeStack[32];
     int stackPtr = 0;
 
     nodeStack[stackPtr++] = 0; // tlas node index 0 is always the root
 
     while (stackPtr > 0) {
-        result.tlasIterationCount++;
+        tlasIterationCount++;
 
         // Pop node off stack
         int nodeIndex = nodeStack[--stackPtr];
@@ -42,6 +45,8 @@ __device__ IntersectionData DevScene::intersect(const Ray& ray) {
 
 			Geom geometry = dev_geometry[geomIndex];
 			IntersectionData geometryResult = IntersectionStatics::intersectGeometry(ray, geometry, dev_blasNodes, dev_triangles, m_lightCount);
+            blasIterationCount += geometryResult.blasIterationCount;
+
             if(geometryResult.t > 0.0f && (result.t < 0.0f || geometryResult.t < result.t)) {
                 result = geometryResult;
                 result.geometryIndex = geomIndex;
@@ -55,6 +60,9 @@ __device__ IntersectionData DevScene::intersect(const Ray& ray) {
             }
         }
     }
+
+    result.tlasIterationCount = tlasIterationCount;
+    result.blasIterationCount = blasIterationCount;
 #else
     for (int i = 0; i < m_geometryCount; i++) {
         IntersectionData intersection = IntersectionStatics::intersectGeometry(ray, dev_geometry[i], dev_blasNodes, dev_triangles);

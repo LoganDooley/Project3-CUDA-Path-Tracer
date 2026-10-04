@@ -304,8 +304,8 @@ __global__ void kernShade(
         if (lightPdf > 0.0f && glm::length(lightSample) > 0.0f) {
 			// Find the pdf if this direction was sampled from the BRDF
 			glm::vec3 wi = -pathState.ray.direction;
-			glm::vec3 f = material.evaluate(intersectionData.normal, wi, directionToLight, intersectionData.bInside, false);
-			float pdfBrdf = material.pdf(intersectionData.normal, wi, directionToLight, intersectionData.bInside, false);
+			glm::vec3 f = material.evaluate(intersectionData.normal, wi, directionToLight, intersectionData.bInside);
+			float pdfBrdf = material.pdf(intersectionData.normal, wi, directionToLight, intersectionData.bInside);
 
 			float misWeight = MathHelpers::powerHeuristic(lightPdf, pdfBrdf);
 
@@ -396,7 +396,62 @@ __global__ void kernDebugUV(cudaSurfaceObject_t surface,
     surf2Dwrite(pixelColor, surface, x * sizeof(uchar4), y);
 }
 
-__global__ void kernColorSurface(cudaSurfaceObject_t surface, 
+__device__ glm::vec3 heatmapColor(float t) {
+    // Map t from 0 -> 1 to a range of colors from blue -> red
+    t = glm::clamp(t, 0.0f, 1.0f);
+
+    const glm::vec3 stops[5] = {
+        glm::vec3(0.0f, 0.0f, 1.0f), // Blue
+        glm::vec3(0.0f, 1.0f, 1.0f), // Cyan
+        glm::vec3(0.0f, 1.0f, 0.0f), // Green
+        glm::vec3(1.0f, 1.0f, 0.0f), // Yellow
+        glm::vec3(1.0f, 0.0f, 0.0f)  // Red
+    };
+
+    float scaled = t * 4.0f;
+    int lower = glm::min((int)scaled, 3);
+    return glm::mix(stops[lower], stops[lower + 1], scaled - (float)lower);
+}
+
+__global__ void kernDebugBvhHeatmap(cudaSurfaceObject_t surface,
+    const PathState* dev_pathStates,
+    const IntersectionData* dev_intersectionData,
+    int activePathCount,
+    int width,
+    BvhHeatmapMode mode,
+    int maxSteps)
+{
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= activePathCount) {
+        return;
+    }
+
+    const IntersectionData& intersection = dev_intersectionData[index];
+
+    int steps = 0;
+    switch (mode) {
+    case BvhHeatmapMode::Blas:
+        steps = intersection.blasIterationCount;
+        break;
+    case BvhHeatmapMode::Tlas:
+        steps = intersection.tlasIterationCount;
+        break;
+    default:
+        steps = intersection.blasIterationCount + intersection.tlasIterationCount;
+        break;
+    }
+
+    // Divide the steps by the max so we can have a defined range for 0 -> 1
+    glm::vec3 color = heatmapColor((float)steps / (float)glm::max(maxSteps, 1));
+
+    int pixelX = 0;
+    int pixelY = 0;
+    get2DIndex(dev_pathStates[index].pixelIndex, width, &pixelX, &pixelY);
+
+    surf2Dwrite(convertColorToUChar4(color), surface, pixelX * sizeof(uchar4), pixelY);
+}
+
+__global__ void kernColorSurface(cudaSurfaceObject_t surface,
     glm::vec3* dev_accumulatedColor,
     glm::vec4* dev_currentDirectColor,
     glm::vec4* dev_currentIndirectColor,
@@ -554,6 +609,26 @@ void launchColorKernel(cudaSurfaceObject_t surface, int width, int height, float
     dim3 gridSize((width + blockSize.x - 1) / blockSize.x, (height + blockSize.y - 1) / blockSize.y);
 
     fillSurfaceColorKernel << <gridSize, blockSize >> > (surface, width, height, r, g, b);
+}
+
+void launchBvhHeatmapKernel(PathState* dev_pathStates,
+    IntersectionData* dev_intersectionData,
+    int activePathCount,
+    cudaSurfaceObject_t surface,
+    int width,
+    BvhHeatmapMode mode,
+    int maxSteps)
+{
+    dim3 blockSize(32);
+    dim3 gridSize(divup(activePathCount, blockSize.x));
+
+    kernDebugBvhHeatmap << <gridSize, blockSize >> > (surface,
+        dev_pathStates,
+        dev_intersectionData,
+        activePathCount,
+        width,
+        mode,
+        maxSteps);
 }
 
 void launchDebugUVKernel(IntersectionData* dev_intersectionData, cudaSurfaceObject_t surface, int width, int height)

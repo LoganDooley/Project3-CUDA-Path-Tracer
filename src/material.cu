@@ -27,7 +27,7 @@ __device__ void Material::initializeFromIntersection(const IntersectionData& int
 	}
 }
 
-__device__ glm::vec3 Material::evaluate(const glm::vec3& n, const glm::vec3& wi, const glm::vec3& wo, bool bInside, bool bDirectionGeneratedFromBrdf)
+__device__ glm::vec3 Material::evaluate(const glm::vec3& n, const glm::vec3& wi, const glm::vec3& wo, bool bInside)
 {
 	if (isDelta()) {
 		return glm::vec3(0.0f);
@@ -79,7 +79,7 @@ __device__ glm::vec3 Material::evaluate(const glm::vec3& n, const glm::vec3& wi,
 	}
 }
 
-__device__ float Material::pdf(const glm::vec3& n, const glm::vec3& wi, const glm::vec3& wo, bool bInside, bool bDirectionGeneratedFromBrdf)
+__device__ float Material::pdf(const glm::vec3& n, const glm::vec3& wi, const glm::vec3& wo, bool bInside)
 {
 	if(isDelta()) {
 		return 0.0f;
@@ -212,11 +212,11 @@ __device__ void Material::sample(
 	float cosThetaO = glm::dot(n, wo);
 	bIsTransmission = cosThetaO < 0.0f;
 
-	outPdf = pdf(n, wi, wo, bInside, true);
+	outPdf = pdf(n, wi, wo, bInside);
 	if (outPdf <= 0.0f) {
 		outThroughput = glm::vec3(0.0f);
 		return;
 	}
 
-	outThroughput = evaluate(n, wi, wo, bInside, true) * glm::abs(cosThetaO) / outPdf;
+	outThroughput = evaluate(n, wi, wo, bInside) * glm::abs(cosThetaO) / outPdf;
 }

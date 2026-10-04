@@ -16,6 +16,8 @@ struct IntersectionData {
 	int materialIndex = 0;
 	bool bInside = false;
 	float pdfIfLight = 0.0f;
+
+	// BVH iteration counts for debug
 	int blasIterationCount = 0;
 	int tlasIterationCount = 0;
 };
@@ -237,13 +239,15 @@ private:
 	{
 		IntersectionData result = IntersectionData{};
 
+		int blasIterationCount = 0;
+
 		int nodeStack[32];
 		int stackPtr = 0;
 
 		nodeStack[stackPtr++] = geometry.blasNodeOffset;
 
 		while (stackPtr > 0) {
-			result.blasIterationCount++;
+			blasIterationCount++;
 
 			// Pop node off stack
 			int nodeIndex = nodeStack[--stackPtr];
@@ -288,6 +292,8 @@ private:
 			// Update pdfifLight based on the number of triangles
 			result.pdfIfLight = result.pdfIfLight / geometry.triangleCount;
 		}
+
+		result.blasIterationCount = blasIterationCount;
 
 		return result;
 	}

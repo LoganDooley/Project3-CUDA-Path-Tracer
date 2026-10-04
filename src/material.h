@@ -75,18 +75,16 @@ struct Material
     __device__ void initializeFromIntersection(const IntersectionData& intersectionData);
 
 	__device__ glm::vec3 evaluate(
-        const glm::vec3& n, 
-        const glm::vec3& wi, 
-        const glm::vec3& wo, 
-        bool bInside, 
-        bool bDirectionGeneratedFromBrdf);
+        const glm::vec3& n,
+        const glm::vec3& wi,
+        const glm::vec3& wo,
+        bool bInside);
 
     __device__ float pdf(
-        const glm::vec3& n, 
-        const glm::vec3& wi, 
-        const glm::vec3& wo, 
-        bool bInside, 
-		bool bDirectionGeneratedFromBrdf);
+        const glm::vec3& n,
+        const glm::vec3& wi,
+        const glm::vec3& wo,
+        bool bInside);
 
     __device__ void sample(
         const glm::vec3& n, 

@@ -49,8 +49,6 @@ private:
 	unsigned int* dev_sampleCounts = nullptr;
 	glm::vec3* dev_accumulatedColor = nullptr;
 
-	int m_activeRayCount = 0;
-
 	int m_frameIndex = 0;
 
 	SVGFManager m_svgfManager;

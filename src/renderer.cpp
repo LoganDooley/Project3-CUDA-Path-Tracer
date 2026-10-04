@@ -124,6 +124,19 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
             scene,
             currentActivePathCount);
 
+        if (i == 0 && m_renderSettings.bShowBvhHeatmap) {
+            launchBvhHeatmapKernel(dev_pathStates,
+                dev_intersectionData,
+                currentActivePathCount,
+                m_cudaSurfaceObject,
+                m_extent.width,
+                m_renderSettings.bvhHeatmapMode,
+                m_renderSettings.bvhHeatmapMaxSteps);
+
+            cudaDeviceSynchronize();
+            return;
+        }
+
         if (i == 0 && m_renderSettings.bSVGFEnabled) {
             m_svgfManager.captureGBuffer(dev_pathStates, dev_intersectionData, currentActivePathCount, camera, scene);
         }
@@ -260,12 +273,31 @@ void Renderer::drawRenderSettingsImGui(Camera& camera)
             m_svgfManager.resize(0, 0);
 		}
     }
+    // Performance settings
     ImGui::Checkbox("Use Stream Compaction:", &m_renderSettings.bStreamCompactionEnabled);
 	ImGui::Checkbox("Sort Paths by Material:", &m_renderSettings.bSortPathsByMaterial);
+
+    // BVH settings
+    ImGui::Text("BVH Heatmap:");
+    if (ImGui::Checkbox("Show BVH Heatmap", &m_renderSettings.bShowBvhHeatmap)) {
+        camera.m_hasChanged = true;
+    }
+    ImGui::BeginDisabled(!m_renderSettings.bShowBvhHeatmap);
+    const char* heatmapModeLabels[] = { "Total", "BLAS", "TLAS" };
+    int heatmapMode = static_cast<int>(m_renderSettings.bvhHeatmapMode);
+    if (ImGui::Combo("Heatmap Mode", &heatmapMode, heatmapModeLabels, IM_ARRAYSIZE(heatmapModeLabels))) {
+        m_renderSettings.bvhHeatmapMode = static_cast<BvhHeatmapMode>(heatmapMode);
+    }
+    ImGui::SliderInt("Max Steps", &m_renderSettings.bvhHeatmapMaxSteps, 1, 500);
+    ImGui::EndDisabled();
+
+	// SVGF settings
     ImGui::Text("SVGF Settings:");
     ImGui::BeginDisabled(!m_renderSettings.bSVGFEnabled);
     m_svgfManager.drawSettingsImGui();
     ImGui::EndDisabled();
+
+	// Camera settings
     ImGui::Text("Camera Settings:");
     ImGui::BeginDisabled(m_renderSettings.bSVGFEnabled);
     if (ImGui::SliderFloat("Lens Radius", &camera.m_lensRadius, 0.0f, 0.25f)) {
@@ -312,6 +344,4 @@ void Renderer::cleanup()
         cudaFree(dev_accumulatedColor);
         dev_accumulatedColor = nullptr;
     }
-
-    m_activeRayCount = 0;
 }
