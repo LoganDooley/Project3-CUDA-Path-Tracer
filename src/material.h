@@ -98,26 +98,6 @@ struct Material
         float& outPdf, 
 		bool& bIsTransmission);
 
-    __device__ glm::vec3 sampleBrdf(
-        const glm::vec3& normal,
-        const glm::vec3& wi,
-        const glm::vec2& random,
-        bool bInside,
-        float& outPdf);
-
-    __device__ float getBrdfPdf(
-        const glm::vec3& normal,
-        const glm::vec3& wi,
-        const glm::vec3& wo,
-		bool bDirectionGeneratedFromBrdf);
-
-    __device__ glm::vec3 evaluateBrdf(
-        const glm::vec3& normal,
-        const glm::vec3& wi,
-        const glm::vec3& wo,
-        bool bDirectionGeneratedFromBrdf
-    );
-
     __device__ MicrofacetScattering getSpecularScattering() const {
 		MicrofacetScattering scattering{};
         scattering.ior = ior;
@@ -138,52 +118,4 @@ struct Material
 
         return scattering;
     }
-
-private:
-	// OBJ/JSON material type BRDFs
-    __device__ glm::vec3 evaluateDiffuseBrdf(
-        const glm::vec3& normal,
-        const glm::vec3& outgoingDirection);
-
-    __device__ glm::vec3 sampleDiffuseBrdf(
-        const glm::vec3& normal,
-        const glm::vec2& random,
-        float& outPdf);
-
-    __device__ glm::vec3 evaluateGlossySpecularBrdf(
-        const glm::vec3& normal,
-        const glm::vec3& wi,
-        const glm::vec3& outgoingDirection);
-
-    __device__ glm::vec3 sampleGlossySpecularBrdf(
-        const glm::vec3& normal,
-        const glm::vec3& wi,
-        const glm::vec2& random,
-        float& outPdf);
-
-    __device__ glm::vec3 evaluatePerfectSpecularBrdf(
-        bool bDirectionGeneratedFromBrdf
-    );
-
-    __device__ glm::vec3 samplePerfectSpecularBrdf(
-        const glm::vec3& normal,
-        const glm::vec3& wi,
-        float random,
-        bool bInside,
-        float& outPdf
-    );
-
-	// glTF material type BRDFs
-    __device__ glm::vec3 evaluatePbrGGXBrdf(
-        const glm::vec3& normal,
-        const glm::vec3& wi,
-		const glm::vec3& wo,
-        bool bInside);
-
-    __device__ glm::vec3 samplePbrGGXBrdf(
-        const glm::vec3& normal,
-        const glm::vec3& wi,
-		const glm::vec2& random,
-        bool bInside,
-		float& outPdf);
 };

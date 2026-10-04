@@ -27,23 +27,6 @@ public:
 		return r * glm::vec2(glm::cos(theta), glm::sin(theta));
 	}
 
-	__host__ __device__ static glm::vec3 sampleWorldUniformHemisphere(const glm::vec3& normal, const glm::vec2& random, float& outPdf){
-		glm::vec3 localSample = sampleLocalUniformHemisphere(random);
-
-		glm::vec3 tangent;
-		glm::vec3 bitangent;
-		MathHelpers::createCoordinateSystem(normal, tangent, bitangent);
-
-		outPdf = 1.0f / (2.0f * glm::pi<float>());
-
-		return localSample.x * tangent + localSample.y * bitangent + localSample.z * normal;
-	}
-
-	__host__ __device__ static float getCosineWeightedHemispherePdf(const glm::vec3& normal, const glm::vec3& outgoingDirection) {
-		float cosTheta = glm::max(0.0f, glm::dot(normal, outgoingDirection));
-		return cosTheta / glm::pi<float>();
-	}
-
 	__host__ __device__ static glm::vec3 sampleCosineWeightedHemisphere(const glm::vec3& normal, const glm::vec2& random, float& outPdf) {
 		glm::vec3 localSample = sampleLocalCosineWeightedHemisphere(random);
 
@@ -57,94 +40,6 @@ public:
 		outPdf = cosTheta / glm::pi<float>();
 
 		return outgoingDirection;
-	}
-
-	__host__ __device__ static float getBlinnPhongPdf(const glm::vec3& normal, const glm::vec3& wi, const glm::vec3& wo, float specularExponent) {
-		glm::vec3 halfVector = MathHelpers::safeNormalize(wi + wo);
-		float dotNH = glm::max(0.0f, glm::dot(normal, halfVector));
-		float dotIH = glm::max(0.0f, glm::dot(wi, halfVector));
-		if (dotIH <= 0.0f) {
-			return 0.0f;
-		}
-		float dH = ((specularExponent + 2.0f) / (2.0f * glm::pi<float>())) * glm::pow(dotNH, specularExponent);
-		return dH / (4.0f * dotIH);
-	}
-
-	__host__ __device__ static glm::vec3 sampleWorldBlinnPhong(const glm::vec3& normal,
-		const glm::vec3& incoming,
-		const glm::vec2& random,
-		float specularExponent,
-		float& outPdf) {
-		glm::vec3 localHalfVector = sampleLocalBlinnPhong(random, specularExponent);
-
-		glm::vec3 tangent;
-		glm::vec3 bitangent;
-		MathHelpers::createCoordinateSystem(normal, tangent, bitangent);
-		glm::vec3 halfVector = localHalfVector.x * tangent + localHalfVector.y * bitangent + localHalfVector.z * normal;
-
-		// Make sure h is in the same hemisphere as the normal
-		if (glm::dot(halfVector, normal) < 0.0f) {
-			halfVector = -halfVector;
-		}
-
-		glm::vec3 outgoing = 2.0f * glm::dot(incoming, halfVector) * halfVector - incoming;
-
-		// Calculate the pdf
-		float dotNH = glm::max(0.0f, glm::dot(normal, halfVector));
-		float dotIH = glm::max(0.0f, glm::dot(incoming, halfVector));
-
-		if (dotIH <= 0.0f) {
-			// This should flag to termiante the path, invalid
-			outPdf = 0.0f;
-			return glm::vec3(0.0f);
-		}
-
-		float dH = ((specularExponent + 2.0f) / (2.0f * glm::pi<float>())) * glm::pow(dotNH, specularExponent);
-		outPdf = dH / (4.0f * dotIH);
-		return outgoing;
-	}
-
-	__host__ __device__ static glm::vec3 sampleWorldGGX(
-		const glm::vec3& normal,
-		const glm::vec3& incoming,
-		const glm::vec2& random,
-		float roughness,
-		float& outPdf)
-	{
-		float alpha = roughness * roughness;
-		float alpha2 = alpha * alpha;
-
-		// Sample in local space
-		glm::vec3 localHalfVector = sampleLocalGGX(random, alpha);
-
-		// Transform into world space
-		glm::vec3 tangent;
-		glm::vec3 bitangent;
-		MathHelpers::createCoordinateSystem(normal, tangent, bitangent);
-		glm::vec3 halfVector = localHalfVector.x * tangent + localHalfVector.y * bitangent + localHalfVector.z * normal;
-
-		// Make sure h is in the same hemisphere as the normal
-		if (glm::dot(halfVector, normal) < 0.0f) {
-			halfVector = -halfVector;
-		}
-
-		glm::vec3 outgoing = 2.0f * glm::dot(incoming, halfVector) * halfVector - incoming;
-
-		float dotNH = glm::max(0.0f, glm::dot(normal, halfVector));
-		float dotIH = glm::max(0.0f, glm::dot(incoming, halfVector));
-		float dotOH = glm::max(0.0f, glm::dot(outgoing, halfVector));
-
-		if (glm::dot(outgoing, normal) <= 0.0f || dotIH <= 0.0f || dotOH <= 0.0f) {
-			outPdf = 0.0f;
-			return glm::vec3(0.0f);
-		}
-
-		float denomD = (dotNH * dotNH * (alpha2 - 1.0f) + 1.0f);
-		float D = alpha2 / (glm::pi<float>() * denomD * denomD);
-
-		outPdf = (D * dotNH) / (4.0f * dotOH);
-
-		return outgoing;
 	}
 
 	__host__ __device__ static glm::vec3 sampleGeometry(const Geom& geometry, const Triangle* dev_triangles, glm::vec3& random, glm::vec3& outNormal, float& outPdf) {
@@ -185,35 +80,10 @@ public:
 	}
 
 private:
-	__host__ __device__ static glm::vec3 sampleLocalUniformHemisphere(const glm::vec2& random) {
-		float z = random.x;
-		float r = glm::sqrt(glm::max(0.0f, 1.0f - z * z));
-		float phi = 2.0f * glm::pi<float>() * random.y;
-		return glm::vec3(r * glm::cos(phi), r * glm::sin(phi), z);
-	}
-
 	__host__ __device__ static glm::vec3 sampleLocalCosineWeightedHemisphere(const glm::vec2& random) {
 		glm::vec2 d = sampleUniformDiskConcentric(random);
 		float z = glm::sqrt(1 - d.x * d.x - d.y * d.y);
 		return glm::vec3(d.x, d.y, z);
-	}
-
-	__host__ __device__ static glm::vec3 sampleLocalBlinnPhong(const glm::vec2& random, float specularExponent) {
-		float phi = 2.0f * glm::pi<float>() * random.y;
-		float cosTheta = glm::pow(random.x, 1.0f / (specularExponent + 1.0f));
-		float sinTheta = glm::sqrt(glm::max(0.0f, 1.0f - cosTheta * cosTheta));
-
-		return glm::vec3(sinTheta * glm::cos(phi), sinTheta * glm::sin(phi), cosTheta);
-	}
-
-	__host__ __device__ static glm::vec3 sampleLocalGGX(const glm::vec2& random, float alpha) {
-		float alpha2 = alpha * alpha;
-		float phi = 2.0f * glm::pi<float>() * random.y;
-
-		float cosThetaH = glm::sqrt((1.0f - random.x) / (1.0f + (alpha2 - 1.0f) * random.x));
-		float sinThetaH = glm::sqrt(glm::max(0.0f, 1.0f - cosThetaH * cosThetaH));
-
-		return glm::vec3(sinThetaH * glm::cos(phi), sinThetaH * glm::sin(phi), cosThetaH);
 	}
 
 	__host__ __device__ static glm::vec3 sampleUnitSphere(const glm::vec2& random, glm::vec3& outNormal, float& outPdf) {

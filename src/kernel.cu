@@ -259,8 +259,10 @@ __global__ void kernShade(
     }
 
     // Handle invalid material (shouldn't happen)
-    if (intersectionData.materialIndex >= dev_scene.m_materialCount) {
+    if (intersectionData.materialIndex < 0 || intersectionData.materialIndex >= dev_scene.m_materialCount) {
+        // Still record the path so the pixel's sample count and SVGF input stay in sync
         pathState.active = false;
+        writePathStateToSurface(pathState, surface, dev_accumulatedColor, dev_currentDirectColor, dev_currentIndirectColor, dev_sampleCounts, width, true);
         return;
     }
 
