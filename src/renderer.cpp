@@ -87,69 +87,87 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
         m_frameIndex = 0;
     }
 
+    m_profiler.beginFrame();
+
     int initialActivePathCount = getPixelCount();
     int currentActivePathCount = initialActivePathCount;
     int maxBounces = m_renderSettings.maxBounces;
 
-    launchCameraRayGenKernel(
-        dev_pathStates,
-        m_extent.width,
-        m_extent.height,
-        camera,
-        m_frameIndex,
-        m_renderSettings.bMSAAEnabled);
+    {
+        auto stage = m_profiler.scope("Camera Rays");
+        launchCameraRayGenKernel(
+            dev_pathStates,
+            m_extent.width,
+            m_extent.height,
+            camera,
+            m_frameIndex,
+            m_renderSettings.bMSAAEnabled);
+    }
 
     for (int i = 0; i < maxBounces; i++) {
         if (currentActivePathCount <= 0) {
             break;
         }
 
-        launchIntersectKernel(dev_pathStates,
-            dev_intersectionData,
-            scene,
-            currentActivePathCount);
+        {
+            auto stage = m_profiler.scope("Intersect");
+            launchIntersectKernel(dev_pathStates,
+                dev_intersectionData,
+                scene,
+                currentActivePathCount);
+        }
 
         if (i == 0 && m_renderSettings.bShowBvhHeatmap) {
-            launchBvhHeatmapKernel(dev_pathStates,
-                dev_intersectionData,
-                currentActivePathCount,
-                m_cudaSurfaceObject,
-                m_extent.width,
-                m_renderSettings.bvhHeatmapMode,
-                m_renderSettings.bvhHeatmapMaxSteps);
+            {
+                auto stage = m_profiler.scope("BVH Heatmap");
+                launchBvhHeatmapKernel(dev_pathStates,
+                    dev_intersectionData,
+                    currentActivePathCount,
+                    m_cudaSurfaceObject,
+                    m_extent.width,
+                    m_renderSettings.bvhHeatmapMode,
+                    m_renderSettings.bvhHeatmapMaxSteps);
+            }
 
             cudaDeviceSynchronize();
+            m_profiler.endFrame();
             return;
         }
 
         if (i == 0 && m_renderSettings.bSVGFEnabled) {
+            auto stage = m_profiler.scope("SVGF G-Buffer");
             m_svgfManager.captureGBuffer(dev_pathStates, dev_intersectionData, currentActivePathCount, camera, scene);
         }
 
         if (m_renderSettings.bSortPathsByMaterial) {
+            auto stage = m_profiler.scope("Material Sort");
             sortPathsByMaterial(dev_pathStates, dev_intersectionData, currentActivePathCount, scene->dev_materials);
         }
 
-        launchShadeKernel(dev_pathStates,
-            dev_intersectionData,
-            scene,
-            environmentMap,
-            currentActivePathCount,
-            dev_accumulatedColor,
-            m_renderSettings.bSVGFEnabled ? m_svgfManager.directChannel.dev_pingBuffer : nullptr,
-            m_renderSettings.bSVGFEnabled ? m_svgfManager.indirectChannel.dev_pingBuffer : nullptr,
-            dev_sampleCounts,
-            m_renderSettings.lightSamplingMode,
-            i,
-            m_frameIndex);
+        {
+            auto stage = m_profiler.scope("Shade");
+            launchShadeKernel(dev_pathStates,
+                dev_intersectionData,
+                scene,
+                environmentMap,
+                currentActivePathCount,
+                dev_accumulatedColor,
+                m_renderSettings.bSVGFEnabled ? m_svgfManager.directChannel.dev_pingBuffer : nullptr,
+                m_renderSettings.bSVGFEnabled ? m_svgfManager.indirectChannel.dev_pingBuffer : nullptr,
+                dev_sampleCounts,
+                m_renderSettings.lightSamplingMode,
+                i,
+                m_frameIndex);
+        }
 
         if (m_renderSettings.bStreamCompactionEnabled) {
-            // Run stream compaction
+            auto stage = m_profiler.scope("Stream Compaction");
             currentActivePathCount = runStreamCompaction(dev_pathStates, currentActivePathCount);
         }
     }
 
     if (currentActivePathCount > 0) {
+        auto stage = m_profiler.scope("Record Active Paths");
         launchRecordActivePathsKernel(dev_pathStates,
             currentActivePathCount,
             dev_accumulatedColor,
@@ -160,7 +178,8 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
 
     // Draw to screen either through SVGF or our accumulated color buffer
     if (m_renderSettings.bSVGFEnabled) {
-        // Run svgf
+        auto stage = m_profiler.scope("SVGF Denoise");
+
         m_svgfManager.evaluate();
 
         m_svgfManager.debugIlluminance(m_cudaSurfaceObject);
@@ -168,6 +187,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
         m_svgfManager.swapBuffers();
     }
     else {
+        auto stage = m_profiler.scope("Display");
         launchDisplayAccumulatedSamplesKernel(m_cudaSurfaceObject,
             dev_accumulatedColor,
             dev_sampleCounts,
@@ -178,6 +198,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
     m_frameIndex++;
 
     cudaDeviceSynchronize();
+    m_profiler.endFrame();
 }
 
 void Renderer::saveCurrentRenderToFile(const std::string& filepath)
@@ -267,6 +288,8 @@ void Renderer::drawRenderSettingsImGui(Camera& camera)
     }
 
     // Performance settings
+    ImGui::Text("GPU Timings:");
+    m_profiler.drawImGui();
     if (ImGui::SliderInt("Max Bounces", &m_renderSettings.maxBounces, 1, 32)) {
         camera.m_hasChanged = true;
     }

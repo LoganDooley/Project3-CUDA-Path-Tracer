@@ -10,6 +10,7 @@
 #include "environmentMap.h"
 #include "svgfManager.h"
 #include "renderSettings.h"
+#include "gpuProfiler.h"
 
 #include <memory>
 
@@ -52,4 +53,6 @@ private:
 	int m_frameIndex = 0;
 
 	SVGFManager m_svgfManager;
+
+	GpuProfiler m_profiler;
 };
