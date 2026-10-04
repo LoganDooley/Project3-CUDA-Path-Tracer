@@ -19,6 +19,10 @@ struct RenderSettings {
 	int maxBounces = 6;
 	LightSamplingMode lightSamplingMode = LightSamplingMode::Mis;
 
+	// Stop rendering once every pixel has this many samples, for equal sample comparisons
+	bool bLimitSamples = false;
+	int targetSamplesPerPixel = 1024;
+
 	bool bStreamCompactionEnabled = false;
 	bool bSortPathsByMaterial = false;
 

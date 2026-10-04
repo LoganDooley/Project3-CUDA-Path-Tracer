@@ -87,6 +87,23 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
         m_frameIndex = 0;
     }
 
+    if (hasReachedSampleTarget()) {
+        // Redraw the image so it makes it into the swapchain
+        if (m_renderSettings.bSVGFEnabled) {
+            m_svgfManager.display(m_cudaSurfaceObject);
+        }
+        else {
+            launchDisplayAccumulatedSamplesKernel(m_cudaSurfaceObject,
+                dev_accumulatedColor,
+                dev_sampleCounts,
+                m_extent.width,
+                m_extent.height);
+        }
+         
+        cudaDeviceSynchronize();
+        return;
+    }
+
     m_profiler.beginFrame();
 
     int initialActivePathCount = getPixelCount();
@@ -256,6 +273,18 @@ void Renderer::saveCurrentRenderToFile(const std::string& filepath)
 void Renderer::drawRenderSettingsImGui(Camera& camera)
 {
     ImGui::Text("Render Settings:");
+
+    // Sample count
+    ImGui::Text("Samples Per Pixel: %d%s", m_frameIndex, hasReachedSampleTarget() ? " (Done)" : "");
+    ImGui::Checkbox("Stop at Target", &m_renderSettings.bLimitSamples);
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!m_renderSettings.bLimitSamples);
+    ImGui::SetNextItemWidth(120.0f);
+    if (ImGui::InputInt("##TargetSamples", &m_renderSettings.targetSamplesPerPixel, 64, 1024)) {
+        m_renderSettings.targetSamplesPerPixel = glm::max(m_renderSettings.targetSamplesPerPixel, 1);
+    }
+    ImGui::EndDisabled();
+
     if (ImGui::Checkbox("Use MSAA", &m_renderSettings.bMSAAEnabled)) {
 		// Don't allow MSAA to be used with SVGF
         if(m_renderSettings.bMSAAEnabled && m_renderSettings.bSVGFEnabled) {

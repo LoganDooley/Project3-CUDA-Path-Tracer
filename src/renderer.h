@@ -36,6 +36,10 @@ private:
 
 	int getPixelCount() const { return m_extent.width * m_extent.height; }
 
+	bool hasReachedSampleTarget() const {
+		return m_renderSettings.bLimitSamples && m_frameIndex >= m_renderSettings.targetSamplesPerPixel;
+	}
+
 	RenderSettings m_renderSettings;
 
 	cudaExternalMemory_t m_cudaExtMemory = nullptr;
