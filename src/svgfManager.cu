@@ -12,6 +12,8 @@
 
 #include <initializer_list>
 
+constexpr unsigned int MAX_HISTORY_LENGTH = 32;
+
 __device__ glm::vec2 calculateMotionVector(
 	glm::vec3 worldPos,
 	glm::mat4 currentViewProj,
@@ -243,7 +245,7 @@ __global__ void kernTemporalAccumulation(
 
 		// Update history length
 		unsigned int historicalCount = __float2uint_rn(totalHistoryCount / totalBilinearWeight);
-		unsigned int updatedHistoryCount = glm::min(historicalCount + 1, 32U);
+		unsigned int updatedHistoryCount = glm::min(historicalCount + 1, MAX_HISTORY_LENGTH);
 		dev_historyLength[pixelIndex] = updatedHistoryCount;
 
 		float colorAlpha = glm::max(1.0f / (float)updatedHistoryCount, colorAlphaMin);
@@ -668,6 +670,57 @@ __global__ void kernDebugVariance(
 	writeSurfacePixel(surface, x, y, glm::vec3(visualIntensity, 0.0f, visualIntensity));
 }
 
+// Draws one filtered lighting channel, remodulated
+__global__ void kernDisplayChannel(
+	const glm::vec4* dev_channel,
+	const glm::vec3* dev_gBuffer_albedo,
+	cudaSurfaceObject_t surface,
+	int width, int height)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x >= width || y >= height) return;
+
+	int pixelIndex = y * width + x;
+
+	glm::vec3 hdrColor = glm::vec3(dev_channel[pixelIndex]) * dev_gBuffer_albedo[pixelIndex];
+	writeSurfacePixel(surface, x, y, Tonemapping::toDisplayColor(hdrColor));
+}
+
+__global__ void kernDisplayAlbedo(
+	const glm::vec3* dev_gBuffer_albedo,
+	cudaSurfaceObject_t surface,
+	int width, int height)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x >= width || y >= height) return;
+
+	int pixelIndex = y * width + x;
+
+	// Albedo is already in [0, 1], so just gamma correct to display
+	writeSurfacePixel(surface, x, y, Tonemapping::gammaCorrect(dev_gBuffer_albedo[pixelIndex], 2.2f));
+}
+
+__global__ void kernDisplayHistoryLength(
+	const unsigned int* dev_historyLength,
+	cudaSurfaceObject_t surface,
+	int width, int height)
+{
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+	if (x >= width || y >= height) return;
+
+	int pixelIndex = y * width + x;
+
+	// Blue for no history, red for a full history
+	float t = (float)dev_historyLength[pixelIndex] / (float)MAX_HISTORY_LENGTH;
+	writeSurfacePixel(surface, x, y, heatmapColor(t));
+}
+
 __global__ void kernDemodulateAlbedo(
 	glm::vec4* dev_direct,
 	glm::vec4* dev_indirect,
@@ -1019,41 +1072,58 @@ void SVGFManager::combineChannels()
 		);
 }
 
-void SVGFManager::debugNormals(cudaSurfaceObject_t surface)
+void SVGFManager::display(cudaSurfaceObject_t surface)
 {
+	if (m_width <= 0 || m_height <= 0) {
+		return;
+	}
+
 	dim3 blockSize(16, 16);
 	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
 
-	kernDebugNormals << <gridSize, blockSize >> > (dev_gBuffer_normalDepth, surface, m_width, m_height);
-}
-
-void SVGFManager::debugMotionVectors(cudaSurfaceObject_t surface)
-{
-	dim3 blockSize(16, 16);
-	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
-
-	kernDebugMotionVectors << <gridSize, blockSize >> > (dev_gBuffer_motionVectors, surface, m_width, m_height);
-}
-
-void SVGFManager::debugIlluminance(cudaSurfaceObject_t surface)
-{
-	dim3 blockSize(16, 16);
-	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
-
-	kernDebugSVGFIllumination << <gridSize, blockSize >> > (dev_outputColor, surface, m_width, m_height);
-}
-
-void SVGFManager::debugVariance(cudaSurfaceObject_t surface, bool bIndirect)
-{
-	dim3 blockSize(16, 16);
-	dim3 gridSize = make2DGrid(m_width, m_height, blockSize);
-
-	const SVGFChannel& channel = bIndirect ? indirectChannel : directChannel;
-	kernDebugVariance << <gridSize, blockSize >> > (channel.dev_variancePing, surface, m_width, m_height);
+	switch (m_svgfSettings.view) {
+	case SVGFView::Direct:
+		kernDisplayChannel << <gridSize, blockSize >> > (directChannel.dev_pingBuffer, dev_gBuffer_albedo, surface, m_width, m_height);
+		break;
+	case SVGFView::Indirect:
+		kernDisplayChannel << <gridSize, blockSize >> > (indirectChannel.dev_pingBuffer, dev_gBuffer_albedo, surface, m_width, m_height);
+		break;
+	case SVGFView::Albedo:
+		kernDisplayAlbedo << <gridSize, blockSize >> > (dev_gBuffer_albedo, surface, m_width, m_height);
+		break;
+	case SVGFView::DirectVariance:
+		kernDebugVariance << <gridSize, blockSize >> > (directChannel.dev_variancePing, surface, m_width, m_height);
+		break;
+	case SVGFView::IndirectVariance:
+		kernDebugVariance << <gridSize, blockSize >> > (indirectChannel.dev_variancePing, surface, m_width, m_height);
+		break;
+	case SVGFView::HistoryLength:
+		kernDisplayHistoryLength << <gridSize, blockSize >> > (dev_gBuffer_historyLength, surface, m_width, m_height);
+		break;
+	case SVGFView::Normals:
+		kernDebugNormals << <gridSize, blockSize >> > (dev_gBuffer_normalDepth, surface, m_width, m_height);
+		break;
+	case SVGFView::MotionVectors:
+		kernDebugMotionVectors << <gridSize, blockSize >> > (dev_gBuffer_motionVectors, surface, m_width, m_height);
+		break;
+	default:
+		kernDebugSVGFIllumination << <gridSize, blockSize >> > (dev_outputColor, surface, m_width, m_height);
+		break;
+	}
 }
 
 void SVGFManager::drawSettingsImGui()
 {
+	const char* viewLabels[] = {
+		"Final", "Direct", "Indirect", "Albedo",
+		"Direct Variance", "Indirect Variance", "History Length",
+		"Normals", "Motion Vectors"
+	};
+	int view = static_cast<int>(m_svgfSettings.view);
+	if (ImGui::Combo("View", &view, viewLabels, IM_ARRAYSIZE(viewLabels))) {
+		m_svgfSettings.view = static_cast<SVGFView>(view);
+	}
+
 	ImGui::SliderFloat("Color Alpha", &m_svgfSettings.colorAlpha, 0.01f, 1.0f);
 	ImGui::SliderFloat("Moments Alpha", &m_svgfSettings.momentsAlpha, 0.01f, 1.0f);
 	ImGui::SliderFloat("Sigma Luminance", &m_svgfSettings.sigmaLuminance, 0.1f, 16.0f);

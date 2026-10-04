@@ -369,23 +369,6 @@ __global__ void kernDebugUV(cudaSurfaceObject_t surface,
     writeSurfacePixel(surface, x, y, glm::vec3(intersection.uv, 0.0f));
 }
 
-__device__ glm::vec3 heatmapColor(float t) {
-    // Map t from 0 -> 1 to a range of colors from blue -> red
-    t = glm::clamp(t, 0.0f, 1.0f);
-
-    const glm::vec3 stops[5] = {
-        glm::vec3(0.0f, 0.0f, 1.0f), // Blue
-        glm::vec3(0.0f, 1.0f, 1.0f), // Cyan
-        glm::vec3(0.0f, 1.0f, 0.0f), // Green
-        glm::vec3(1.0f, 1.0f, 0.0f), // Yellow
-        glm::vec3(1.0f, 0.0f, 0.0f)  // Red
-    };
-
-    float scaled = t * 4.0f;
-    int lower = glm::min((int)scaled, 3);
-    return glm::mix(stops[lower], stops[lower + 1], scaled - (float)lower);
-}
-
 __global__ void kernDebugBvhHeatmap(cudaSurfaceObject_t surface,
     const PathState* dev_pathStates,
     const IntersectionData* dev_intersectionData,

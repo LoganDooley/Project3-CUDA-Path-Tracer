@@ -54,13 +54,7 @@ public:
 
 	void evaluate();
 
-	void debugNormals(cudaSurfaceObject_t surface);
-
-	void debugMotionVectors(cudaSurfaceObject_t surface);
-
-	void debugIlluminance(cudaSurfaceObject_t surface);
-
-	void debugVariance(cudaSurfaceObject_t surface, bool bIndirect = false);
+	void display(cudaSurfaceObject_t surface);
 
 	void drawSettingsImGui();
 

@@ -182,7 +182,7 @@ void Renderer::render(const std::unique_ptr<Scene>& scene, const std::unique_ptr
 
         m_svgfManager.evaluate();
 
-        m_svgfManager.debugIlluminance(m_cudaSurfaceObject);
+        m_svgfManager.display(m_cudaSurfaceObject);
 
         m_svgfManager.swapBuffers();
     }
