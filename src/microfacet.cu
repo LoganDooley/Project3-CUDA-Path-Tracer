@@ -79,7 +79,7 @@ __device__ glm::vec3 MicrofacetScattering::evaluate(const glm::vec3& n, const gl
 			return glm::vec3(0.0f);
 		}
 
-		float transmissionValue = ((dotOH * dotIH) * D * G * (1.0f - F)) /
+		float transmissionValue = ((absDotOH * dotIH) * D * G * (1.0f - F)) /
 			(cosThetaI * absCosThetaO * sqrtDenom * sqrtDenom);
 
 		return transmissionTint * transmissionValue;
@@ -143,21 +143,21 @@ __device__ float MicrofacetScattering::pdf(const glm::vec3& n, const glm::vec3& 
 __device__ void MicrofacetScattering::sample(
 	const glm::vec3& n, const glm::vec3& wi,
 	const glm::vec3& random, bool bInside,
-	glm::vec3& out_wo, glm::vec3& out_throughput, float& out_pdf, bool& out_isTransmission) const
+	glm::vec3& out_wo, float& out_pdf, bool& out_isTransmission) const
 {
 	float cosThetaI = glm::dot(n, wi);
 	if (cosThetaI <= 0.0f) {
+		// Incoming vector is behind the material, fail
 		out_pdf = 0.0f;
-		out_throughput = glm::vec3(0.0f);
 		return;
 	}
 
-
+	// Sample the half vector in local space
 	glm::vec3 H_local = (model == DistributionModel::GGX)
 		? Microfacet::Sample_GGX(glm::vec2(random), alpha)
 		: Microfacet::Sample_BlinnPhong(glm::vec2(random), specularExponent);
 
-	// Transform to world space
+	// Transform half vector to world space
 	glm::vec3 tangent, bitangent;
 	MathHelpers::createCoordinateSystem(n, tangent, bitangent);
 	glm::vec3 H = glm::normalize(tangent * H_local.x + bitangent * H_local.y + n * H_local.z);
@@ -181,15 +181,11 @@ __device__ void MicrofacetScattering::sample(
 		float cosThetaO = glm::dot(n, out_wo);
 		if (cosThetaO <= 0.0f || dotIH <= 0.0f) {
 			out_pdf = 0.0f;
-			out_throughput = glm::vec3(0.0f);
 			return;
 		}
 
 		glm::vec3 f = evaluate(n, wi, out_wo, bInside);
 		out_pdf = (pdfHalf / (4.0f * dotIH)) * reflectionProb;
-		out_throughput = (out_pdf <= 0.0f) ?
-			glm::vec3(0.0f) :
-			(f * cosThetaO) / out_pdf;
 	}
 	else {
 		// Refract
@@ -204,17 +200,11 @@ __device__ void MicrofacetScattering::sample(
 			float cosThetaO = glm::dot(n, out_wo);
 			if (cosThetaO <= 0.0f || dotIH <= 0.0f) {
 				out_pdf = 0.0f;
-				out_throughput = glm::vec3(0.0f);
 				return;
 			}
 
-			glm::vec3 f = evaluate(n, wi, out_wo, bInside);
-
 			// Reflection probability is 1.0, so no need to multiply the pdf by reflectionProb
 			out_pdf = pdfHalf / (4.0f * dotIH);
-			out_throughput = (out_pdf <= 0.0f)
-				? glm::vec3(0.0f)
-				: (f * cosThetaO) / out_pdf;
 			return;
 		}
 
@@ -229,16 +219,11 @@ __device__ void MicrofacetScattering::sample(
 		float sqrtDenom = dotIH + (etaT / etaI) * dotOH;
 		if (glm::abs(sqrtDenom) < 1e-6f) {
 			out_pdf = 0.0f;
-			out_throughput = glm::vec3(0.0f);
 			return;
 		}
 
-		glm::vec3 f = evaluate(n, wi, out_wo, bInside);
 		float transmissionProb = 1.0f - reflectionProb;
 
 		out_pdf = (pdfHalf * (etaT * etaT / (etaI * etaI)) * absDotOH / (sqrtDenom * sqrtDenom)) * transmissionProb;
-		out_throughput = (out_pdf <= 0.0f)
-			? glm::vec3(0.0f)
-			: (f * absCosThetaO) / out_pdf;
 	}
 }

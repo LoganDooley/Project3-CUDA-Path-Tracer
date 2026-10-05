@@ -124,8 +124,9 @@ struct MicrofacetScattering {
 
 	__device__ float pdf(const glm::vec3& n, const glm::vec3& wi, const glm::vec3& wo, bool bInside) const;
 
+	// Sampling function for phong and pbr materials
 	__device__ void sample(
 		const glm::vec3& n, const glm::vec3& wi,
 		const glm::vec3& random, bool bInside,
-		glm::vec3& out_wo, glm::vec3& out_throughput, float& out_pdf, bool& out_isTransmission) const;
+		glm::vec3& out_wo, float& out_pdf, bool& out_isTransmission) const;
 };

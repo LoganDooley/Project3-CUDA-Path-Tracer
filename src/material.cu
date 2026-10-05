@@ -121,6 +121,7 @@ __device__ void Material::sample(
 {
 	float cosThetaI = glm::dot(n, wi);
 	if (cosThetaI <= 0.0f) {
+		// Incoming vector is opposite the normal, fail to sample
 		outPdf = 0.0f;
 		outThroughput = glm::vec3(0.0f);
 		return;
@@ -128,6 +129,7 @@ __device__ void Material::sample(
 
 	if (isDelta()) {
 		if (type == MaterialType::PerfectSpecular && !blinnPhong.bRefractive) {
+			// Mirror with no transmission, sample direction is always pure reflection
 			wo = glm::reflect(-wi, n);
 			outPdf = 1.0f;
 			outThroughput = albedo;
@@ -135,68 +137,59 @@ __device__ void Material::sample(
 			return;
 		}
 
-		// Glass
+		// Glass, could either reflect or refract
 		float etaI = bInside ? ior : 1.0f;
 		float etaT = bInside ? 1.0f : ior;
+		// Get reflection probability using Schlick's approximation
 		float F = Microfacet::F_SchlickDielectric(cosThetaI, etaI, etaT);
 
 		float eta = etaI / etaT;
 		glm::vec3 refracted = glm::refract(-wi, n, eta);
+
+		// Check for total internal reflection. glm::refract will return a zero vector if this happens
 		bool bTIR = (glm::dot(refracted, refracted) <= 0.0f);
+
+		// Only perfect specular or blinn phong can be delta, so just take albedo as throughput
+		outThroughput = albedo;
 
 		if(random.z < F || bTIR) {
 			wo = glm::reflect(-wi, n);
-			outPdf = bTIR ? 1.0f : F;
-
-			if(type == MaterialType::PerfectSpecular) {
-				outThroughput = albedo;
-			}
-			else {
-				outThroughput = glm::mix(glm::vec3(F), albedo, pbr.metallic);
-			}
-
+			outPdf = bTIR ? 1.0f : F; // TIR forces reflection, so the pdf in that case is 1.0
 			bIsTransmission = false;
 		}
 		else {
 			wo = glm::normalize(refracted);
 			outPdf = 1.0f - F;
-
-			if(type == MaterialType::PerfectSpecular) {
-				outThroughput = albedo;
-			}
-			else {
-				outThroughput = albedo * pbr.transmission;
-			}
-
 			bIsTransmission = true;
 		}
 
-		outPdf = 1.0f;
 		return;
 	}
 
 	if (type == MaterialType::OpaqueDiffuse) {
-		bIsTransmission = false;
-
+		// Simple diffuse material, use cosine weighted hemisphere sampling
 		wo = Samplers::sampleCosineWeightedHemisphere(n, glm::vec2(random), outPdf);
 		outThroughput = albedo;
+		bIsTransmission = false;
 		return;
 	}
 
-	// Pick between diffuse and microfacet sampling
+	// Pick between diffuse and microfacet sampling for faster convergence
 	float diffuseProbability = getDiffuseSampleProbability();
 
 	if (random.z < diffuseProbability) {
+		// Use cosine weighted hemisphere sampling for diffuse reflection
 		float diffusePdf = 0.0f;
 		wo = Samplers::sampleCosineWeightedHemisphere(n, glm::vec2(random), diffusePdf);
 	}
 	else {
+		// Use microfacet sampling
 		glm::vec3 remappedRandom = glm::vec3(random.x, random.y, (random.z - diffuseProbability) / (1.0f - diffuseProbability));
 
 		MicrofacetScattering scattering = getSpecularScattering();
-		glm::vec3 lobeThroughput = glm::vec3(0.0f);
+		// Dummy value since we will recalculate the pdf after
 		float lobePdf = 0.0f;
-		scattering.sample(n, wi, remappedRandom, bInside, wo, lobeThroughput, lobePdf, bIsTransmission);
+		scattering.sample(n, wi, remappedRandom, bInside, wo, lobePdf, bIsTransmission);
 
 		if (lobePdf <= 0.0f) {
 			outPdf = 0.0f;
