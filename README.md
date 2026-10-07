@@ -377,9 +377,15 @@ One other potential strategy to improve performance is by sorting rays by materi
 
 However, with large ray structures, this sorting process can be quite significant in terms of frame time, and for this project actually proved to worsen the overall performance. This is likely due to the relatively large size of PathState structs that need to be sorted, requiring a higher memory throughput to complete the sort.
 
-| Scene | Num Materials | Off: Shade (ms) | On: Sort + Shade (ms) 
-|---|---|---|---|
-| | | | |
+For a 1920 x 1080 render of the material_showcase.json and Sponza scenes, I saw the following results with and without sorting by material enabled:
+
+![](img/material_sort_performance.png)
+
+Reference images of the view angles for the material_showcase.json and Sponza scene are below:
+
+| material_sort.json | Sponza |
+|:-:|:-:|
+| ![](img/material_showcase_sort_off.png) | ![](img/sponza_sort_64spp.png) |
 
 * **Future work:** I think a more effective method to attempt here would be doing wavefront pathtracing where material sorting is implicit via. binning. This would possibly reduce the heavy cost of moving memory during this sorting step which makes it not worth it.
 
@@ -597,6 +603,44 @@ The renderer then imports this memory to CUDA whenever the application is resize
 ---
 
 ## Building
+
+### Requirements
+* Windows 10/11 (Linux is not supported due to CUDA-Vulkan interop using Win32 memory handles)
+* An NVIDIA GPU with Vulkan support
+* [CUDA Toolkit](https://developer.nvidia.com/cuda-downloads) (tested with 13.1)
+* [Vulkan SDK](https://vulkan.lunarg.com/) (tested with 1.4.328.1)
+* Visual Studio 2022
+* CMake 3.24 or newer
+
+### Build Steps
+Run the following commands in terminal:
+```bash
+   cmake -S . -B build
+   cmake --build build --config Release
+   ```
+
+It loads `scenes/cornell.json` at startup, though the camera is in the floor, so you will need to hold Space to move upwards and see the scene. Otherwise, you can use the scene loader in the ImGui panel to load your own custom scene.
+
+### CMakeLists.txt Changes
+The CMakeLists.txt was essentially rewritten from the template project. These are the main modifications:
+
+* **Vulkan:** `find_package(Vulkan)` replaces OpenGL/GLEW, and `VK_USE_PLATFORM_WIN32_KHR` (or `VK_USE_PLATFORM_XLIB_KHR` on Linux, although previously mentioned not supported)
+
+* **External libraries/git submodules:** In `external/`, I use `add_subdirectory` for: GLFW (docs, tests, and examples disabled), GLM, nlohmann/json, and Native File Dialog Extended. I add Dear ImGui's sources and its GLFW and Vulkan backends directly into the executable to be compiled. stb image, tinygltfloader, and tinyobjloader are header-only and added as include directories.
+
+* **Source files:** I use `GLOB_RECURSE` from `src/` for file endings of `.cpp`, `.cu`, `.h`, and `.hpp`. New files are picked up after re-running CMake configure.
+
+* **CUDA settings:**
+  * C++17 for both CUDA and C++, with `CMAKE_CUDA_ARCHITECTURES native` to build for the GPU in the machine.
+  * `CUDA_SEPARABLE_COMPILATION ON` This allows multiple .cu files to conain cuda kernels.
+  * `--expt-relaxed-constexpr` so GLM's `constexpr` functions can be called from device code. This was causing issues with using glm in CUDA kernels otherwise.
+  * `--diag-suppress=20012` to hide some GLM warnings which were cluttering the build information.
+  * `-Xcompiler=/Zc:preprocessor` This is required by Thrust with CUDA 13.1 and above.
+  * `-O3` added in Release, `-G` added in Debug, and also `--generate-line-info` added for NSight profiling to work.
+
+* **Compile definitions:** `GLFW_INCLUDE_VULKAN`, `GLM_FORCE_PURE` (added since glm functions were corrupted when called within CUDA kernels otherwise), and `NOMINMAX` (without this `windows.h` defined `min`/`max` were colliding with glm functions).
+
+* **Scene copying:** copies `scenes/` next to the executable so the default scene is accesible at runtime. This isn't strictly necessary for other scenes though, since they are selected via a file picker.
 
 
 ---
