@@ -647,6 +647,41 @@ The CMakeLists.txt was essentially rewritten from the template project. These ar
 
 ## Bloopers
 
+### Texture UV Disaster
+I did not realize the orientation for textures with glTF and OBJ files were different, so I got some horribly textured scenes like the bedroom scene here:
+
+| Blooper | Fixed |
+|:-:|:-:|
+| ![](img/blooper_textures.png) | ![](img/blooper_textures_fixed.png) |
+
+**Problem:** OBJ follows the OpenGL convention for textures which means $v = 0$ is the *bottom* of the image. However, glTF puts $v = 0$ at the *top*. I was flipping $v$ for every format, so glTF textures were sampled upside down and for this scene, the texture atlas sampling was totally messed up.
+
+### Incorrectly Signed Refraction Dot Product
+At one point, my rough transmission was rendering as opaque instead of see-through, like in the beautiful game scene here:
+
+| Blooper | Fixed |
+|:-:|:-:|
+| ![](img/blooper_glass.png) | ![](img/blooper_glass_fixed.png) |
+
+**Problem:** When a ray was refracting, the incoming and outgoing directions were on *opposite* sides of the half vector, so my calculation of $\omega_o \cdot \mathbf{h}_t$ was negative. However, some places in the BTDF need that value to be signed and others unsigned, I was using the signed version for everything.
+
+### NaN Values in SVGF
+When using SVGF, occasionally a single black pixel would appear, and then slowly spread across the screen, even with the camera standing still:
+
+| Blooper | Fixed |
+|:-:|:-:|
+| ![](img/blooper_svgf_nan_values.gif) | ![](img/blooper_svgf_nan_values_fixed.png) |
+
+**Problem:** Sometimes, a path was generating a NaN or infinite radiance. This wasn't noticable with regular accumlulation since it only affects a single pixel, but with SVGF, it spread across the scene. I fixed this by adding safeguards for non finite values when recording path radiance and checking history for temporal reporjection. 
+
+### SVGF Cross-Geometry Albedo Blur
+There was a smearing halo effect of complentary colors when using SVGF at one point:
+
+| Blooper | Fixed |
+|:-:|:-:|
+| ![](img/blooper_svgf_blur.gif) | ![](img/blooper_svgf_blur_fixed.gif) |
+
+**Problem:** In SVGF, the illumination is first divided by albedo and then multiplied back at the end. However at the edges of objects, the temporal ccumulation would sometimes pull from the object behind since the depth and normals were similar. I fixed this by adding a geometry ID buffer so I wouldn't sample from different geometries themselves. This is not a surefire fix if for example the entire scene is a single mesh, but worked in this case for some extra security.
 
 ---
 
