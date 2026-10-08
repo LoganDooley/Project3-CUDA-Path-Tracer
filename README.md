@@ -728,6 +728,7 @@ There was a smearing halo effect of complentary colors when using SVGF at one po
   * **Damaged Helmet**, "Battle Damaged Sci-fi Helmet - PBR" by [theblueturtle_](https://sketchfab.com/theblueturtle_), [CC BY-NC](https://creativecommons.org/licenses/by-nc/4.0/). [Original on Sketchfab](https://sketchfab.com/models/b81008d513954189a063ff901f7abfe4).
   * **Flight Helmet**, donated by Microsoft for glTF testing, [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
   * **Sponza**, Crytek Sponza by Frank Meinl (Crytek), based on the original by Marko Dabrovic, with PBR textures by [Alexandre Pestana](http://www.alexandre-pestana.com/pbr-textures-sponza/) and fixes by Morgan McGuire.
+  * **Suzanne**, Blender's test monkey, donated by Norbert Nopper for glTF testing.
   * **Toy Car**, initial model by Guido Odendahl, extensions and scene composition by Eric Chadwick, [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
 
 * HDRI environment maps from [Poly Haven](https://polyhaven.com/hdris), all [CC0](https://creativecommons.org/publicdomain/zero/1.0/):
