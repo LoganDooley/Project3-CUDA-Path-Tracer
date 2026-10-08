@@ -699,8 +699,31 @@ There was a smearing halo effect of complentary colors when using SVGF at one po
 * [Vulkan SDK](https://vulkan.lunarg.com/sdk/home) 
 * [Thrust](https://developer.nvidia.com/thrust)
 
-### Assets
-* (TODO)
+### Asset References
 
-### References
-* (TODO)
+* OBJ Files from Morgan McGuire's [Computer Graphics Archive](https://casual-effects.com/data)
+
+* glTF Files from the Khronos Group's [glTF-Sample-Models](https://github.com/KhronosGroupArchives/glTF-Sample-Models)
+
+* HDRI Environment Maps from [Poly Haven](https://polyhaven.com/hdris)
+
+### Implementation References
+* M. Pharr, W. Jakob, G. Humphreys. *Physically Based Rendering: From Theory to Implementation*, 4th ed. [link](https://www.pbr-book.org/)
+
+* R. Cook, K. Torrance. *A Reflectance Model for Computer Graphics*. ACM Transactions on Graphics, 1982. https://doi.org/10.1145/357290.357293
+
+* James F. Blinn. 1977. Models of light reflection for computer synthesized pictures. SIGGRAPH Comput. Graph. 11, 2 (Summer 1977), 192–198. https://doi.org/10.1145/965141.563893
+
+* C. Schlick. *An Inexpensive BRDF Model for Physically-based Rendering*. Computer Graphics Forum, 13(3):233–246, 1994. https://doi.org/10.1111/1467-8659.1330233
+
+* B. Walter, S. R. Marschner, H. Li, K. E. Torrance. *Microfacet Models for Refraction through Rough Surfaces*. Proceedings of the 18th Eurographics Conference on Rendering Techniques (EGSR '07), pp. 195–206, 2007. https://dl.acm.org/doi/10.5555/2383847.2383874
+
+* The Khronos Group. *glTF 2.0 Specification*. [link](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html)
+
+* E. Veach, L. J. Guibas. *Optimally Combining Sampling Techniques for Monte Carlo Rendering*. Proceedings of the 22nd Annual Conference on Computer Graphics and Interactive Techniques (SIGGRAPH '95), pp. 419–428, 1995. https://doi.org/10.1145/218380.218498
+
+* C. Schied, A. Kaplanyan, C. Wyman, et al. *Spatiotemporal Variance-Guided Filtering: Real-Time Reconstruction for Path-Traced Global Illumination*. Proceedings of High Performance Graphics (HPG '17), Article 2, 2017. https://doi.org/10.1145/3105762.3105770
+
+* The Khronos Group. *Vulkan Tutorial*. [link](https://docs.vulkan.org/tutorial/latest/00_Introduction.html)
+
+* NVIDIA. *CUDA Programming Guide*, [link](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/graphics-interop.html)
