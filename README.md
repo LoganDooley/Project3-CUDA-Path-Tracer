@@ -5,7 +5,7 @@ Real-Time CUDA-Vulkan Path Tracer with SVGF Denoising
 
 * Logan Dooley
   * [LinkedIn](https://www.linkedin.com/in/logan-dooley-a205a619a/)
-* Tested on: Windows 11, 13th Gen Intel(R) Core(TM) i5-13420H (2.10 GHz), 16GB RAM, RTX 4050 Laptop
+* Tested on: Windows 11, AMD Ryzen 7 9800X3D, 32GB RAM, NVIDIA GeForce RTX 5060 Ti 16GB
 
 ![Toy Car](img/ToyCarSunset_2048spp.png)
 
