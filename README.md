@@ -11,7 +11,7 @@ Real-Time CUDA-Vulkan Path Tracer with SVGF Denoising
 
 *[Toy Car](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/ToyCar) · 1920×1080 · 2048 spp · depth of field w/ lens radius 0.082 and focal distance 5.039 · Environment Map: [The Sky Is On Fire](https://polyhaven.com/a/the_sky_is_on_fire)*
 
-**Demo video:** (TODO) link
+**Demo video:** [Video Link](https://www.youtube.com/watch?v=75lLGDiI3wY)
 
 ---
 
