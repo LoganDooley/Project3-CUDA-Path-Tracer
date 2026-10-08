@@ -633,6 +633,13 @@ Run the following commands in terminal:
 
 It loads `scenes/cornell.json` at startup, though the camera is in the floor, so you will need to hold Space to move upwards and see the scene. Otherwise, you can use the scene loader in the ImGui panel to load your own custom scene.
 
+### Controls
+* **W / S:** move forward / backward
+* **A / D:** move left / right
+* **Space / Left Shift:** move up / down
+* **Right mouse drag:** look around
+* **Scroll wheel:** adjust movement speed
+
 ### CMakeLists.txt Changes
 The CMakeLists.txt was essentially rewritten from the template project. These are the main modifications:
 
