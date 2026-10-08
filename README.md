@@ -29,8 +29,6 @@ Real-Time CUDA-Vulkan Path Tracer with SVGF Denoising
   * [Performance Features](#performance-features)
   * [Real-Time Denoising (SVGF)](#real-time-denoising-svgf)
   * [CUDA-Vulkan Interop](#cuda-vulkan-interop)
-* [Performance Analysis](#performance-analysis)
-* [Scene Format](#scene-format)
 * [Building](#building)
 * [Bloopers](#bloopers)
 * [Credits & References](#credits--references)
@@ -55,6 +53,21 @@ Real-Time CUDA-Vulkan Path Tracer with SVGF Denoising
 
 ## Gallery
 
+![San Miguel](img/san_miguel_512spp.png)
+
+*San Miguel Scene, 512 spp, 1920 x 1080*
+
+![Living Room](img/living_room_1024spp.png)
+
+*Living Room Scene, 1024 spp, 1920 x 1080*
+
+![Damaged Helmet](img/damaged_helmet_1024spp.png)
+
+*Damaged Helmet, 1024 spp, 1920 x 1080*
+
+![Sponza](img/sponza_1024spp.png)
+
+*Sponza Scene w/ DoF, 1024 spp, 1920 x 1080*
 
 ---
 
@@ -160,7 +173,7 @@ $$f_t(\omega_o, \omega_i) = \frac{|\omega_o\cdot\mathbf{h}_t|\,|\omega_i\cdot\ma
 ##### Performance
 For testing, I used the Suzanne model and rendered it up close so the number of pixels needed to be shaded was maximized. I used the material override capability of my scene loader to render the model as a single material, and render at 1920 x 1080. I then measured the runtime of the shading kernel and compared them to find the following using diffuse as a baseline:
 
-![alt text](img/material_perf_comparison.png)
+![Shade time per material type](img/material_perf_comparison.png)
 
 Notably, the mirror material is the least costly for shading. This is expected as the reflected direction is very simple to compute and involves no randomness, and NEE (along with its shadow ray) is skipped for delta materials. Mirror paths also tend to reflect once off the convex model and escape.
 
@@ -311,13 +324,9 @@ This project also supports texturing for albedo as well as using metallic-roughn
 
 *Flight helmet scene rendered with and without textures, 1024 spp, 1920 x 1080*
 
-#### Loading Analysis
-| Scene | Format | Triangles | Load time (s) |
-|---|---|---|---|
-| | | | |
+#### Scene Loading Analysis
 
-
-* **GPU vs. CPU:** Scene parsingis done entirely on the CPU, only the final buffers are uploaded to the GPU.
+* **GPU vs. CPU:** Scene parsing and BVH construction are done entirely on the CPU, and only the final buffers are uploaded to the GPU.
 
 * **Future work:** I would consider adding support for more glTF extensions, as well as possibly trying building the BVH on the GPU which could help with large scenes.
 
@@ -333,13 +342,13 @@ In terms of partitioning, I used a simple midpoint split along the longest axis 
 |:-:|:-:|
 | ![](img/bvh_dragon_ref_1024spp.png) | ![](img/bvh_heatmap_dragon_150.png) |
 
-*Dragon Scene, 1920 X 1080, 1024 spp reference, max bvh depth for heatmap of 150*
+*Dragon Scene, 1920 x 1080, 1024 spp reference, heatmap scaled to a max of 150 traversal steps*
 
 | Render | BVH heatmap|
 |:-:|:-:|
 | ![](img/bvh_sponza_ref_128spp.png) | ![](img/bvh_heatmap_sponza_300.png) |
 
-*Sponza Scene, 1920 X 1080, 128 spp reference, max bvh depth for heatmap of 300*
+*Sponza Scene, 1920 x 1080, 128 spp reference, heatmap scaled to a max of 300 traversal steps*
 
 The following tests were done at 800 x 600 resolution.
 
@@ -349,9 +358,9 @@ The following tests were done at 800 x 600 resolution.
 | Dragon | 871,306 | 2137.92 ms | 2094.27 ms | 13.53 ms|
 | Gallery | 998,941 | N/A (couldn't run) | N/A (couldn't run) | 46.17 ms |
 
-* **GPU vs. CPU:** Traversal is stack based and iterative, and threads in a warp diverge when rays take different paths through the tree. A CPU would traverse the same tree per ray without the issue of warp divergence, but wouldn't be abled to run as many rays in parallel.
+* **GPU vs. CPU:** Traversal is stack based and iterative, and threads in a warp diverge when rays take different paths through the tree. A CPU would traverse the same tree per ray without the issue of warp divergence, but wouldn't be able to run as many rays in parallel.
 
-* **Future work:** The next improvement I would make is trying out using the surface area heuristic for building the BVH rather than the midpoint split I currently am using. This could potentially make BVH traversal in scenes like the sponza scene more efficient.
+* **Future work:** The next improvement I would make is trying out the surface area heuristic for building the BVH rather than the midpoint split I am currently using. This could potentially make BVH traversal in scenes like Sponza more efficient.
 
 ### Performance Features
 
@@ -362,15 +371,17 @@ Stream compaction will move the currently active rays to the front of a buffer s
 
 The performance benefit depends on the scene and how many rays will escape vs. intersect geometry. In the examples below, I rendered the Dragon scene both up close and far away to evaluate the effect of stream compaction on performance and found opposing effects for each:
 
-![](img/stream_compact_dragon_up_close.png)
-*Dragon model rendered up close, 1920 X 1080*
+![Dragon up close](img/stream_compact_dragon_up_close.png)
 
-![](img/stream_compact_dragon_far_away.png)
-*Dragon model rendered far away, 1920 X 1080*
+*Dragon model rendered up close, 1920 x 1080*
+
+![Dragon far away](img/stream_compact_dragon_far_away.png)
+
+*Dragon model rendered far away, 1920 x 1080*
 
 ![](img/stream_compact_performance.png)
 
-* **Performance:** In general, stream compaction roughly costs a constant amount of time regardless of the setup of the scene. This intuitively makes sense as we are compacting a buffer of N pixels no matter what the scene has within it. However, for the dragon up close, it is seen that stream compaction is a net benefit whereas from far away, it is a net detriment. This is likely because when up close, intersection test dominate the runtime, so compaction is helpful to these by a factor larger than the cost of the compaction itself. However, for the far away dragon, many rays just early out anyways, which isn't too costly especially in this scene where neighboring rays are likely to hit or miss together, so less divergence happens in that regard. Because of that, the added cost of the compaction itself does not outweigh the minor benefit we get for removing the terminated rays from being launched, so the performance actually decreases.
+* **Performance:** In general, stream compaction roughly costs a constant amount of time regardless of the setup of the scene. This intuitively makes sense as we are compacting a buffer of N pixels no matter what the scene has within it. However, for the dragon up close, it is seen that stream compaction is a net benefit whereas from far away, it is a net detriment. This is likely because when up close, intersection tests dominate the runtime, so compaction is helpful to these by a factor larger than the cost of the compaction itself. However, for the far away dragon, many rays just early out anyways, which isn't too costly especially in this scene where neighboring rays are likely to hit or miss together, so less divergence happens in that regard. Because of that, the added cost of the compaction itself does not outweigh the minor benefit we get for removing the terminated rays from being launched, so the performance actually decreases.
 
 #### Material Sorting
 One other potential strategy to improve performance is by sorting rays by material type prior to executing each shading kernel. This is because each material type uses different techniques for evaluation, sampling, and finding the pdf as mentioned previously, and on GPUs this causes a phenomenon known as warp divergence. If threads in the same warp take different paths in an if statement, the if statement will have to be processed serially rather than in parallel. By sorting rays by material type, we reduce the number of warps with differing materials, which can lower warp divergence.
@@ -383,20 +394,26 @@ For a 1920 x 1080 render of the material_showcase.json and Sponza scenes, I saw 
 
 Reference images of the view angles for the material_showcase.json and Sponza scene are below:
 
-| material_sort.json | Sponza |
+| material_showcase.json | Sponza |
 |:-:|:-:|
 | ![](img/material_showcase_sort_off.png) | ![](img/sponza_sort_64spp.png) |
 
-* **Future work:** I think a more effective method to attempt here would be doing wavefront pathtracing where material sorting is implicit via. binning. This would possibly reduce the heavy cost of moving memory during this sorting step which makes it not worth it.
+* **Future work:** I think a more effective method to attempt here would be wavefront path tracing, where material sorting is implicit via binning. This would possibly reduce the heavy cost of moving memory during this sorting step which makes it not worth it.
 
 #### Russian Roulette
 Another performance optimization could be terminating paths when they have very little throughput remaining. However if we do this in a cut off manner, it will bias the final result. The technique used to do this optimization is called Russian roulette and involves setting a "survival probability" on a path at the end of each shading execution which is higher for paths with high remaining throughput and lower for paths with lower remaining throughput. We then pick a random number to evaluate if a path should terminate based on that chance. Those which survive have their throughput divided by their survival probability to account for the random path termination.
 
-In the following test, I rendered the Sponza scene at 800 x 600 resolution with a max bounce count of 12 and measured the number of active paths after each bounce with Russian roulette turned on or off. Paths must complete 2 bounces before Russian roulette begins, and setting the minimum survival to 1 effectively disables russian roulette:
+In the following test, I rendered the Sponza scene at 800 x 600 resolution with a max bounce count of 12 and measured the number of active paths after each bounce with Russian roulette turned on or off. Paths must complete 2 bounces before Russian roulette begins, and setting the minimum survival to 1 effectively disables Russian roulette:
 
-![](img/russian_roulette_activepaths.png)
+![Active paths per bounce with and without Russian roulette](img/russian_roulette_activepaths.png)
 
-![](img/russian_roulette_frametime.png)
+Without Russian roulette, the number of active paths slowly and steadily decreases over time, and 67% of paths are still alive by bounce 12. Since the sponza scene is pretty closed, a lot of these rays are likely bouncing around the enclosed space. With russiasn roulette, once russian roulette starts, a large portion of the rays are immediately terminated. This is likely because their transmission is fairly low after 3 bounces, so russian roulette would favor their termination.
+
+![Frame time by stage with and without Russian roulette](img/russian_roulette_frametime.png)
+
+Since less paths survive to later bounces, the intersection and shading stages become cheaper as they have less rays to process over the course of a frame. Intersection drops from 489.6 ms to 124.2 ms and shading from 13.9 ms to 4.9 ms, making the whole frame about 3.9x faster. Additionally, without Russian roulette,  stream compaction has almost nothing to remove since many of the rays in the sponza scene stay active just bouncing around with little throughput.
+
+At 64 spp, the sponza scene looks nearly identical with and without russian roulette, likely because russian roulette divides the radiance by the survival chance of the ray to avoid bias.
 
 | w/o Russian Roulette | w/ Russian Roulette |
 |:-:|:-:|
@@ -597,11 +614,6 @@ The renderer then imports this memory to CUDA whenever the application is resize
 
 ---
 
-## Scene Format
-
-
----
-
 ## Building
 
 ### Requirements
@@ -701,11 +713,32 @@ There was a smearing halo effect of complentary colors when using SVGF at one po
 
 ### Asset References
 
-* OBJ Files from Morgan McGuire's [Computer Graphics Archive](https://casual-effects.com/data)
+* OBJ files from Morgan McGuire, Computer Graphics Archive, July 2017 (https://casual-effects.com/data)
+
+  * **Bedroom**, © 2017 fhernand, [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Photogrammetry scan created with RealityCapture, materials adjusted for OBJ by Morgan McGuire. Originally published on [Sketchfab](https://sketchfab.com/3d-models/bedroom-869e6ec859a84240b9a099ae829f47fa).
+  * **Cornell Box**, © 2009 Morgan McGuire, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). OBJ versions created by Guedis Cardenas, Morgan McGuire, and Michael Mara, based on the original Cornell Box by Donald Greenberg and students at Cornell University.
+  * **Crytek Sponza**, © 2010 Frank Meinl, Crytek, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Remodeled from Marko Dabrovic's original Sponza.
+  * **Chinese Dragon**, © 1996 Stanford University, from the [Stanford 3D Scanning Repository](https://graphics.stanford.edu/data/3Dscanrep/) (Stanford Scan license).
+  * **Living Room** ("The White Room Cycles"), © 2012 Jay, [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). Converted for rendering research by Benedikt Bitterli, converted to OBJ by Nicholas Hull (NVIDIA), with materials corrected by Morgan McGuire.
+  * **San Miguel 2.0**, © Guillermo M. Leal Llaguno (Evolución Visual), [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). 2017 version improved by Morgan McGuire, Guedis Cardenas, Michael Mara, and Nicholas Hull.
 
 * glTF Files from the Khronos Group's [glTF-Sample-Models](https://github.com/KhronosGroupArchives/glTF-Sample-Models)
 
-* HDRI Environment Maps from [Poly Haven](https://polyhaven.com/hdris)
+  * **A Beautiful Game**, Academy Software Foundation, MaterialX Project, with additional glTF conversion by Ed Mackey (AGI), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Original model by Moeen Sayed and Mujtaba Sayed for a SideFX Karma tutorial.
+  * **Damaged Helmet**, "Battle Damaged Sci-fi Helmet - PBR" by [theblueturtle_](https://sketchfab.com/theblueturtle_), [CC BY-NC](https://creativecommons.org/licenses/by-nc/4.0/). [Original on Sketchfab](https://sketchfab.com/models/b81008d513954189a063ff901f7abfe4).
+  * **Flight Helmet**, donated by Microsoft for glTF testing, [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
+  * **Sponza**, Crytek Sponza by Frank Meinl (Crytek), based on the original by Marko Dabrovic, with PBR textures by [Alexandre Pestana](http://www.alexandre-pestana.com/pbr-textures-sponza/) and fixes by Morgan McGuire.
+  * **Toy Car**, initial model by Guido Odendahl, extensions and scene composition by Eric Chadwick, [CC0](https://creativecommons.org/publicdomain/zero/1.0/).
+
+* HDRI environment maps from [Poly Haven](https://polyhaven.com/hdris), all [CC0](https://creativecommons.org/publicdomain/zero/1.0/):
+
+  * [Lakeside Night](https://polyhaven.com/a/lakeside_night), photography by Greg Zaal, processing by Jarod Guest
+  * [Venice Sunset](https://polyhaven.com/a/venice_sunset), by Greg Zaal
+  * [Penguin Museum](https://polyhaven.com/a/penguin_museum), by Jenelle van Heerden
+  * [Blue Lagoon Night](https://polyhaven.com/a/blue_lagoon_night), by Greg Zaal
+  * [The Sky Is On Fire](https://polyhaven.com/a/the_sky_is_on_fire), by Greg Zaal, backplates by Rico Cilliers
+  * [Belfast Sunset (Pure Sky)](https://polyhaven.com/a/belfast_sunset_puresky), photography by Dimitrios Savva, processing by Greg Zaal, sky edits by Jarod Guest
+  * [Ferndale Studio 04](https://polyhaven.com/a/ferndale_studio_04), photography by Dimitrios Savva, processing by Jarod Guest
 
 ### Implementation References
 * M. Pharr, W. Jakob, G. Humphreys. *Physically Based Rendering: From Theory to Implementation*, 4th ed. [link](https://www.pbr-book.org/)
